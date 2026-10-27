@@ -1,10 +1,11 @@
 from datetime import date, datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from sagrid.nemweb.client import FetchedFile, sha256_bytes
 from sagrid.pipeline import date_range, run_ingest
-from tests.conftest import daily_archive, dispatchis_csv, scada_csv
+from tests.conftest import daily_archive, dispatchis_csv, rooftop_csv, scada_csv
 
 
 class FakeClient:
@@ -16,7 +17,11 @@ class FakeClient:
         self.fetches = 0
 
     def files_for_dates(self, report, days):
-        prefix = "PUBLIC_DISPATCHIS" if report == "dispatchis" else "PUBLIC_DISPATCHSCADA"
+        prefix = {
+            "dispatchis": "PUBLIC_DISPATCHIS",
+            "dispatch_scada": "PUBLIC_DISPATCHSCADA",
+            "rooftop_pv": "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT",
+        }[report]
         return [
             (f"https://nemweb.com.au/x/{prefix}_{d:%Y%m%d}.zip", f"{prefix}_{d:%Y%m%d}.zip")
             for d in days
@@ -29,6 +34,10 @@ class FakeClient:
             day = datetime.strptime(name.rsplit("_", 1)[1][:8], "%Y%m%d")
             if name in self.corrupt:
                 data = b"not a zip"
+            elif "ROOFTOP" in name:
+                data = daily_archive(
+                    day, rooftop_csv, "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT", n=48, step_min=30
+                )
             elif "SCADA" in name:
                 data = daily_archive(day, scada_csv, "PUBLIC_DISPATCHSCADA")
             else:
@@ -49,6 +58,15 @@ def test_full_week_loads_2016_sa_intervals(store, tmp_path):
     assert store.count("price") == 2016
     assert store.con.execute("SELECT count(*) FROM interconnector").fetchone()[0] == 2 * 2016
     assert store.con.execute("SELECT count(*) FROM unit_scada").fetchone()[0] == 2 * 2016
+    assert store.count("rooftop_pv") == 7 * 48  # SA1 MEASUREMENT only
+
+
+def test_rooftop_keeps_measurement_and_period_start(store, tmp_path):
+    run_ingest(START, START, store, FakeClient(tmp_path), dataset_names=["rooftop_pv"])
+    df = store.table("rooftop_pv")
+    assert set(df["TYPE"]) == {"MEASUREMENT"} and set(df["POWER"]) == {1200.0}
+    assert df["INTERVAL_DATETIME"].min() == pd.Timestamp("2026-10-01 00:00")
+    assert df["INTERVAL_DATETIME"].max() == pd.Timestamp("2026-10-01 23:30")
 
 
 def test_rerun_is_idempotent(store, tmp_path):
@@ -58,9 +76,9 @@ def test_rerun_is_idempotent(store, tmp_path):
         t: store.table_hash(t) for t in ("region_summary", "price", "interconnector", "constraint")
     }
     m2 = run_ingest(START, START, store, client)
-    assert m2["totals"]["files_skipped"] == 2 and m2["totals"]["files_loaded"] == 0
+    assert m2["totals"]["files_skipped"] == 3 and m2["totals"]["files_loaded"] == 0
     m3 = run_ingest(START, START, store, client, force=True)  # backfill
-    assert m3["totals"]["files_loaded"] == 2
+    assert m3["totals"]["files_loaded"] == 3
     after = {t: store.table_hash(t) for t in before}
     assert before == after
 

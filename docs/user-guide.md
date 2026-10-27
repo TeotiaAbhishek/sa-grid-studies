@@ -7,7 +7,9 @@
 3. Load a week: `sagrid ingest --start 2026-10-19 --end 2026-10-25`.
 4. Check it: `sagrid check --start 2026-10-19 --end 2026-10-25`.
 
-A week of the five datasets takes a few minutes and a few hundred MB of downloads. Unit SCADA is the largest; leave it out with `--datasets region_summary price interconnector constraint` if you only need the region view.
+A week of the six datasets takes a few minutes and a few hundred MB of downloads. Unit SCADA is the largest; leave it out with `--datasets region_summary price interconnector constraint rooftop_pv` if you only need the region view.
+
+Rooftop PV is published half-hourly, and its weekly archive appears about two weeks after the week starts. Until then the last fortnight comes from the 30-minute files in NEMWEB's Current folder, which is about 48 small downloads per day.
 
 ## Reading the output
 

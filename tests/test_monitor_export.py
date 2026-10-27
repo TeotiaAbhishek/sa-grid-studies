@@ -68,3 +68,16 @@ def test_store_rejects_bad_identifiers(store):
 
     with pytest.raises(ValueError, match="invalid table name"):
         store.table('x"; DROP TABLE runs; --')
+
+
+def test_export_dates_interval_start_tables_by_their_start(store, tmp_path):
+    from tests.conftest import rooftop_csv
+
+    # Half hours starting 23:30 on 30 Sep and 00:00 on 1 Oct.
+    text = rooftop_csv(datetime(2026, 10, 1, 0, 0), n=2)
+    load_texts([("r.CSV", text)], [DATASETS["rooftop_pv"]], store, "run1", "r.zip")
+    export_powerbi(store, tmp_path)
+    fact = pd.read_parquet(tmp_path / "fact_rooftop_pv.parquet")
+    assert fact["DATE"].tolist() == [pd.Timestamp("2026-09-30"), pd.Timestamp("2026-10-01")]
+    dates = pd.read_parquet(tmp_path / "dim_date.parquet")["DATE"].tolist()
+    assert dates == [pd.Timestamp("2026-09-30"), pd.Timestamp("2026-10-01")]
