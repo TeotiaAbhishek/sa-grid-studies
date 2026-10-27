@@ -71,6 +71,7 @@ Unit tests use small files built in AEMO's published CSV layout. The network tes
 ## Documentation
 
 - [User guide](docs/user-guide.md)
+- [Power BI report](docs/powerbi.md): model, DAX measures, page layout
 - [Data governance](docs/data-governance.md): sources, licence, lineage, retention
 - [Decision log](docs/decisions.md)
 - [Security](SECURITY.md)
