@@ -5,7 +5,14 @@ import pytest
 
 from sagrid.nemweb.client import FetchedFile, sha256_bytes
 from sagrid.pipeline import date_range, run_ingest
-from tests.conftest import daily_archive, dispatchis_csv, rooftop_csv, scada_csv
+from tests.conftest import (
+    daily_archive,
+    dispatchis_csv,
+    next_day_dispatch_csv,
+    rooftop_csv,
+    scada_csv,
+    zip_of,
+)
 
 
 class FakeClient:
@@ -21,7 +28,10 @@ class FakeClient:
             "dispatchis": "PUBLIC_DISPATCHIS",
             "dispatch_scada": "PUBLIC_DISPATCHSCADA",
             "rooftop_pv": "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT",
+            "next_day_dispatch": "PUBLIC_NEXT_DAY_DISPATCH",
         }[report]
+        if report == "next_day_dispatch":  # trading days: also the day before (as the client does)
+            days = sorted({d - timedelta(days=1) for d in days} | set(days))
         return [
             (f"https://nemweb.com.au/x/{prefix}_{d:%Y%m%d}.zip", f"{prefix}_{d:%Y%m%d}.zip")
             for d in days
@@ -38,6 +48,10 @@ class FakeClient:
                 data = daily_archive(
                     day, rooftop_csv, "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT", n=48, step_min=30
                 )
+            elif "NEXT_DAY" in name:
+                # one CSV per trading day: 04:05 on the day to 04:00 the next
+                csv = next_day_dispatch_csv(day + timedelta(hours=4, minutes=5))
+                data = zip_of({name.replace(".zip", ".CSV"): csv.encode()})
             elif "SCADA" in name:
                 data = daily_archive(day, scada_csv, "PUBLIC_DISPATCHSCADA")
             else:
@@ -59,6 +73,11 @@ def test_full_week_loads_2016_sa_intervals(store, tmp_path):
     assert store.con.execute("SELECT count(*) FROM interconnector").fetchone()[0] == 2 * 2016
     assert store.con.execute("SELECT count(*) FROM unit_scada").fetchone()[0] == 2 * 2016
     assert store.count("rooftop_pv") == 7 * 48  # SA1 MEASUREMENT only
+    # Unit targets come by trading day, so the files for 30 Sep to 7 Oct are fetched
+    # and 1 to 7 Oct is fully covered (plus the edges of the neighbouring trading days).
+    sol = store.table("unit_solution")
+    days = sol[(sol["SETTLEMENTDATE"] > "2026-10-01") & (sol["SETTLEMENTDATE"] <= "2026-10-08")]
+    assert len(days) == 2 * 2016
 
 
 def test_rooftop_keeps_measurement_and_period_start(store, tmp_path):
@@ -76,9 +95,10 @@ def test_rerun_is_idempotent(store, tmp_path):
         t: store.table_hash(t) for t in ("region_summary", "price", "interconnector", "constraint")
     }
     m2 = run_ingest(START, START, store, client)
-    assert m2["totals"]["files_skipped"] == 3 and m2["totals"]["files_loaded"] == 0
+    files = 5  # dispatchis, scada, rooftop, and two trading days of unit targets
+    assert m2["totals"]["files_skipped"] == files and m2["totals"]["files_loaded"] == 0
     m3 = run_ingest(START, START, store, client, force=True)  # backfill
-    assert m3["totals"]["files_loaded"] == 3
+    assert m3["totals"]["files_loaded"] == files
     after = {t: store.table_hash(t) for t in before}
     assert before == after
 

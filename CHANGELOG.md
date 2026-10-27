@@ -19,6 +19,8 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 - Live-data integration test (`pytest -m network`).
 - `sagrid registry`: builds the generator registry from NEMWEB's MMSDM registration tables.
 - `sagrid investigate`: investigations I1 (binding constraints and their drivers), I2 (Heywood at its limit) and I3 (SCADA data quality, with an issues register), each writing a reproducible report with a data snapshot hash.
+- `unit_solution` dataset: each unit's dispatch target from AEMO's Next Day Dispatch report, fetched by trading day (Current first, then the monthly archive).
+- I3 uses dispatch targets when they are loaded: spikes are judged against the target, constant readings at a constant target are not flagged as stuck, and a new "no response" check finds units reading 0 MW while dispatched.
 - Region summary now carries wind and solar farm output (dispatched and forecast) and battery charge and discharge; older files without these columns still load, and existing databases gain the columns automatically.
 
 ### Fixed

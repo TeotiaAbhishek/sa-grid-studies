@@ -93,6 +93,26 @@ def scada_csv(start: datetime, n: int = 1) -> str:
     return "\n".join(lines) + "\n"
 
 
+UNIT_SOLUTION_COLS = (
+    "SETTLEMENTDATE,RUNNO,DUID,TRADETYPE,DISPATCHINTERVAL,INTERVENTION,CONNECTIONPOINTID,"
+    "DISPATCHMODE,AGCSTATUS,INITIALMW,TOTALCLEARED,AVAILABILITY,SEMIDISPATCHCAP,UIGF"
+)
+
+
+def next_day_dispatch_csv(start: datetime, n: int = 288) -> str:
+    """A trading day of unit targets (a subset of AEMO's 69 columns, in their order)."""
+    lines = [
+        "C,NEMP.WORLD,NEXT_DAY_DISPATCH,AEMO,PUBLIC,2026/10/02,04:10:01,1,NEXT_DAY_DISPATCH,1",
+        "I,DISPATCH,UNIT_SOLUTION,6," + UNIT_SOLUTION_COLS,
+    ]
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        lines.append(f"D,DISPATCH,UNIT_SOLUTION,6,{t},1,TORRB1,0,1,0,STPS1,0,1,700,700,800,0,0")
+        lines.append(f"D,DISPATCH,UNIT_SOLUTION,6,{t},1,HALLWF1,0,1,0,SHL1,0,0,600,600,600,0,600")
+    lines.append(f'C,"END OF REPORT",{len(lines) + 1}')
+    return "\n".join(lines) + "\n"
+
+
 def rooftop_csv(period_end: datetime, n: int = 1, power: float = 1200.0) -> str:
     """Half-hourly rooftop PV file. INTERVAL_DATETIME is the START of the half hour."""
     lines = [

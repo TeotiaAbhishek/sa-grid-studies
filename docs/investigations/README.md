@@ -29,4 +29,4 @@ Each run writes, for every investigation:
 | --- | --- | --- |
 | I1 | region_summary, price, interconnector, constraint, rooftop_pv (optional) | |
 | I2 | region_summary, price, interconnector, rooftop_pv (optional) | |
-| I3 | region_summary, unit_scada | The NEM Registration and Exemption List (`registry_path` in `sagrid.toml`) |
+| I3 | region_summary, unit_scada, unit_solution (optional) | The generator registry (`sagrid registry`) |

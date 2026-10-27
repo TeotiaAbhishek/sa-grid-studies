@@ -8,7 +8,7 @@ Built to production standards: tested on Windows and Linux in CI, validated row 
 
 ## What it does
 
-`sagrid ingest` downloads AEMO NEMWEB dispatch data for a date range and stores six validated datasets in a local DuckDB database:
+`sagrid ingest` downloads AEMO NEMWEB dispatch data for a date range and stores seven validated datasets in a local DuckDB database:
 
 | Dataset | Source table | What it holds |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ Built to production standards: tested on Windows and Linux in CI, validated row 
 | `constraint` | DISPATCH_CONSTRAINT | Network constraints, their marginal values and violations |
 | `rooftop_pv` | ROOFTOP_ACTUAL | SA rooftop solar output estimate (MEASUREMENT, half-hourly) |
 | `unit_scada` | DISPATCH_UNIT_SCADA | Metered output of every NEM generating unit |
+| `unit_solution` | DISPATCH_UNIT_SOLUTION | Every unit's dispatch target (TOTALCLEARED), availability and starting reading, from Next Day Dispatch |
 
 Every run:
 

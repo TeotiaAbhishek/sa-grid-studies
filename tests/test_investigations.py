@@ -380,3 +380,75 @@ def test_i1_leaves_thin_price_comparisons_blank(week):
     nb = i1_constraints.run(week, W).numbers
     always = next(r for r in nb["top"] if r["CONSTRAINTID"] == "F_TEST")
     assert np.isnan(always["RRP_DIFF_SAME_HOUR"])  # binds in every interval
+
+
+def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
+    # Targets for interval t are answered by the reading stamped t + 5 minutes.
+    scada = week.table("unit_scada")
+    t = pd.Series(sorted(scada["SETTLEMENTDATE"].unique()))
+    i = np.arange(len(t))
+    clean = {
+        "WINDA": 50 + 30 * np.sin(i / 40),  # the synthetic wind without noise or faults
+        "GASB": np.full(len(t), 150.0),
+        "GASC": np.full(len(t), 60.0),
+    }
+    # New units: a battery that swings with its targets, a gas unit held at a
+    # setpoint, and a unit that reads 0 MW for 30 minutes while dispatched.
+    batt = np.where(i % 2 == 0, -50.0, 50.0)
+    held = np.full(len(t), 40.0)
+    tripped = np.full(len(t), 100.0)
+    tripped[800:806] = 0.0
+    extra = pd.concat(
+        [
+            pd.DataFrame({"SETTLEMENTDATE": t, "DUID": d, "SCADAVALUE": v})
+            for d, v in (("BATTE", batt), ("GASF", held), ("GASG", tripped))
+        ]
+    )
+    week.upsert(DATASETS["unit_scada"], extra)
+    clean |= {"BATTE": batt, "GASF": held, "GASG": np.full(len(t), 100.0)}
+    sol = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "SETTLEMENTDATE": t - pd.Timedelta(minutes=5),
+                    "DUID": d,
+                    "INTERVENTION": 0,
+                    "INITIALMW": np.nan,
+                    "TOTALCLEARED": v,
+                    "AVAILABILITY": np.nan,
+                    "SEMIDISPATCHCAP": 0.0,
+                    "UIGF": np.nan,
+                }
+            )
+            for d, v in clean.items()
+        ]
+    )
+    week.upsert(DATASETS["unit_solution"], sol)
+    registry = pd.concat(
+        [
+            REGISTRY,
+            pd.DataFrame(
+                {
+                    "DUID": ["BATTE", "GASF", "GASG"],
+                    "REGIONID": "SA1",
+                    "STATION": ["Battery E", "Gas F", "Gas G"],
+                    "DISPATCHTYPE": ["BIDIRECTIONAL", "GENERATOR", "GENERATOR"],
+                    "FUEL": ["Battery", "Gas", "Gas"],
+                    "REG_CAP_MW": [60.0, 50.0, 120.0],
+                }
+            ),
+        ]
+    )
+
+    rep = i3_scada.run(week, W, registry)
+    reg = rep.tables["issues_register"]
+    found = {(r.DUID, r.ISSUE) for r in reg.itertuples()}
+    assert {("WINDA", "spike"), ("WINDA", "stuck"), ("GASG", "no_response")} <= found
+    assert "BATTE" not in set(reg["DUID"])  # swings follow dispatch: not spikes
+    assert ("GASF", "stuck") not in found  # constant target: a setpoint, not frozen telemetry
+    assert rep.numbers["targets_used"] and rep.numbers["stuck_at_setpoint"] >= 1
+    stuck = reg[(reg["DUID"] == "WINDA") & (reg["ISSUE"] == "stuck")]["EVIDENCE"].iloc[0]
+    assert "target moved" in stuck
+    nr = reg[reg["ISSUE"] == "no_response"].iloc[0]
+    assert nr["INTERVALS"] == 6 and "dispatched to 100 MW" in nr["EVIDENCE"]
+    assert "Dispatch targets" in rep.markdown
