@@ -27,6 +27,7 @@ class Settings:
     max_reject_rate: float = 0.01
     max_staleness_hours: float = 36.0
     balance_tolerance_mw: float = 1.0
+    heywood_max_at_limit_share: float | None = None  # alert threshold; unset = report only
 
 
 def _coerce(name: str, value, target):
@@ -35,6 +36,8 @@ def _coerce(name: str, value, target):
             return Path(value)
         if "Path | None" in str(target):
             return Path(value) if value not in (None, "") else None
+        if "float | None" in str(target):
+            return float(value) if value not in (None, "") else None
         if target in (int, "int"):
             return int(value)
         if target in (float, "float"):
@@ -66,6 +69,8 @@ def load_settings(path: Path | None = None, env: Mapping[str, str] | None = None
         raise ConfigError(f"log_level must be DEBUG, INFO, WARNING or ERROR, not {s.log_level}")
     if not 0 <= s.max_reject_rate <= 1:
         raise ConfigError("max_reject_rate must be between 0 and 1")
+    if s.heywood_max_at_limit_share is not None and not 0 <= s.heywood_max_at_limit_share <= 1:
+        raise ConfigError("heywood_max_at_limit_share must be between 0 and 1")
     if s.retries < 0 or s.timeout_s <= 0:
         raise ConfigError("retries must be >= 0 and timeout_s > 0")
     return s

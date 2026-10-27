@@ -1,4 +1,4 @@
-"""Post-run health checks: freshness, completeness, reject rate, reconciliation.
+"""Post-run health checks: freshness, completeness, reject rate, reconciliation, Heywood.
 
 `sagrid check` exits non-zero when any check fails, so a scheduler (GitHub
 Actions here) can raise an alert.
@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from sagrid.align import find_gaps
+from sagrid.investigations.common import at_limit, runs
 from sagrid.reconcile import region_balance, summarise
 from sagrid.store import Store
 
@@ -32,29 +33,33 @@ def run_checks(
     max_reject_rate: float,
     balance_tolerance_mw: float,
     now_utc: datetime | None = None,
+    heywood_max_at_limit_share: float | None = None,
 ) -> list[Check]:
     checks: list[Check] = []
     tables = {r[0] for r in store.con.execute("SHOW TABLES").fetchall()}
     if "region_summary" not in tables:
         return [Check("data_present", False, "region_summary table does not exist yet")]
 
+    lo = datetime.combine(start, datetime.min.time())
+    hi = datetime.combine(end + timedelta(days=1), datetime.min.time())
     rs = store.con.execute(
         "SELECT * FROM region_summary WHERE SETTLEMENTDATE > ? AND SETTLEMENTDATE <= ?",
-        [
-            datetime.combine(start, datetime.min.time()),
-            datetime.combine(end + timedelta(days=1), datetime.min.time()),
-        ],
+        [lo, hi],
     ).df()
 
+    # Freshness is judged against the end of the window, or now if the window
+    # runs past now, so checking a past week doesn't fail just because time
+    # has passed since it was loaded.
     latest = store.scalar("SELECT max(SETTLEMENTDATE) FROM region_summary")
     now_utc = now_utc or datetime.now(UTC).replace(tzinfo=None)
-    now_market = now_utc + NEM_UTC_OFFSET
-    age_h = (now_market - latest).total_seconds() / 3600 if latest else float("inf")
+    due = min(now_utc + NEM_UTC_OFFSET, hi)
+    age_h = max((due - latest).total_seconds() / 3600, 0.0) if latest else float("inf")
     checks.append(
         Check(
             "freshness",
             age_h <= max_staleness_hours,
-            f"latest interval {latest}, {age_h:.1f} h old (limit {max_staleness_hours} h)",
+            f"latest interval {latest}, {age_h:.1f} h before {due:%Y-%m-%d %H:%M} "
+            f"(limit {max_staleness_hours} h)",
         )
     )
 
@@ -83,7 +88,38 @@ def run_checks(
         s = summarise(region_balance(rs, balance_tolerance_mw))
         share = s["flagged"] / s["intervals"]
         checks.append(Check("region_balance", share <= 0.01, json.dumps(s)))
+    if "interconnector" in tables:
+        checks.append(_heywood(store, lo, hi, heywood_max_at_limit_share))
     return checks
+
+
+def _heywood(store: Store, lo: datetime, hi: datetime, max_share: float | None) -> Check:
+    """Share of intervals Heywood spent at a transfer limit, and its longest episode.
+
+    The same definition as investigation I2, so a change in transfer
+    behaviour shows up the day it happens. Without a threshold the check
+    only reports.
+    """
+    ic = store.con.execute(
+        "SELECT SETTLEMENTDATE, MWFLOW, EXPORTLIMIT, IMPORTLIMIT FROM interconnector "
+        "WHERE INTERCONNECTORID = 'V-SA' AND SETTLEMENTDATE > ? AND SETTLEMENTDATE <= ? "
+        "ORDER BY SETTLEMENTDATE",
+        [lo, hi],
+    ).df()
+    if ic.empty:
+        return Check("heywood_at_limit", False, "no Heywood (V-SA) rows in the window")
+    state = at_limit(ic["MWFLOW"], ic["EXPORTLIMIT"], ic["IMPORTLIMIT"])
+    flag = state != ""
+    share = float(flag.mean())
+    longest = 5 * int(runs(flag)["length"].max()) if flag.any() else 0
+    detail = (
+        f"at a limit in {share:.1%} of {len(ic)} intervals "
+        f"(export {(state == 'export').mean():.1%}, import {(state == 'import').mean():.1%}); "
+        f"longest episode {longest} min"
+    )
+    if max_share is None:
+        return Check("heywood_at_limit", True, detail + "; no alert threshold set")
+    return Check("heywood_at_limit", share <= max_share, detail + f" (alert above {max_share:.1%})")
 
 
 def report(checks: list[Check]) -> str:

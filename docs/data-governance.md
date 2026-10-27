@@ -28,7 +28,7 @@ AEMO material is © AEMO and is used with attribution under AEMO's published cop
 
 - Type and range checks per column, and unique keys per dataset (`schemas.py`).
 - Rows that fail go to `rejects`; nothing is silently dropped.
-- Post-run checks: freshness, completeness (2,016 intervals per week), reject rate, and region balance reconciliation (`sagrid check`).
+- Post-run checks: freshness, completeness (2,016 intervals per week), reject rate, region balance reconciliation, and the share of intervals Heywood spent at a transfer limit (`sagrid check`).
 
 ## Retention
 

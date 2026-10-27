@@ -12,6 +12,16 @@ from sagrid.registry import RegistryError, load_registry
 def test_defaults_and_env_override():
     s = load_settings(env={"SAGRID_RETRIES": "1", "SAGRID_MAX_REJECT_RATE": "0.05"})
     assert s.retries == 1 and s.max_reject_rate == 0.05
+    assert s.heywood_max_at_limit_share is None
+
+
+def test_optional_float_setting():
+    s = load_settings(env={"SAGRID_HEYWOOD_MAX_AT_LIMIT_SHARE": "0.4"})
+    assert s.heywood_max_at_limit_share == 0.4
+    assert (
+        load_settings(env={"SAGRID_HEYWOOD_MAX_AT_LIMIT_SHARE": ""}).heywood_max_at_limit_share
+        is None
+    )
 
 
 def test_toml_file(tmp_path):
@@ -27,6 +37,8 @@ def test_toml_file(tmp_path):
         ({"SAGRID_RETRIES": "many"}, "invalid value"),
         ({"SAGRID_LOG_LEVEL": "LOUD"}, "log_level"),
         ({"SAGRID_MAX_REJECT_RATE": "2"}, "between 0 and 1"),
+        ({"SAGRID_HEYWOOD_MAX_AT_LIMIT_SHARE": "1.5"}, "heywood_max_at_limit_share"),
+        ({"SAGRID_HEYWOOD_MAX_AT_LIMIT_SHARE": "half"}, "invalid value"),
     ],
 )
 def test_invalid_settings_fail_fast(env, msg):

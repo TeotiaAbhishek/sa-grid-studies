@@ -19,10 +19,11 @@ Rooftop PV is published half-hourly, and its weekly archive appears about two we
 
 | Check | Passes when |
 | --- | --- |
-| freshness | the newest interval is no older than `max_staleness_hours` |
+| freshness | the newest interval is no more than `max_staleness_hours` before the end of the range (or before now, if the range runs past now). Checking a past week therefore doesn't fail just because time has passed |
 | completeness | every 5-minute interval in the range is present |
 | reject_rate | rejected rows are at most `max_reject_rate` of all rows |
 | region_balance | at most 1% of intervals breach the balance tolerance |
+| heywood_at_limit | reports the share of intervals Heywood was at a transfer limit (I2's definition) and its longest episode. Fails only when the share is above `heywood_max_at_limit_share`, if that is set |
 
 ## When something fails
 

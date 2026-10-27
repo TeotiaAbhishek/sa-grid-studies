@@ -76,7 +76,17 @@ Then:
 - Sort `dim_date[MONTH_NAME]` by `MONTH` (**Column tools > Sort by column**).
 - Hide the fact `DATE`, `DUID` and `INTERCONNECTORID` columns from report view so slicers always use the dimensions.
 
-`DATE` is the market day an interval belongs to: an interval ending at 00:00 belongs to the previous day, matching AEMO. All timestamps are AEST market time (UTC+10, no daylight saving).
+`DATE` is the market day an interval belongs to: an interval ending at 00:00 belongs to the previous day, matching AEMO. All timestamps are AEST market time (UTC+10, no daylight saving). `fact_unit_solution` follows AEMO's trading day (04:05 to 04:00), so its first and last days are partly loaded; filter on `dim_date` as usual.
+
+### Data quality columns
+
+`sagrid export` adds these, so no calculated columns are needed for them:
+
+| Table | Column | Meaning |
+| --- | --- | --- |
+| `fact_unit_scada` | `SCADA_ISSUE` | The I3 issue this reading falls in (`stuck`, `spike`, `above_capacity`, `no_response`, `off_target`, `brief_departure`, `negative`), or `none` when it was checked and nothing was found. Blank when the reading wasn't screened (no registry, or a unit outside SA) |
+| `fact_unit_scada` | `IS_SUSPECT` | True for stuck, spike and above-capacity readings: the value itself is likely wrong. Blank when not screened |
+| `fact_constraint` | `IS_PENALTY` | True when the marginal value is 100,000 or more in size: a violated constraint, not a market price. Leave these out of price-based measures |
 
 ### Calculated columns and the hour dimension
 
@@ -96,18 +106,15 @@ fact_rooftop_pv[HOUR]     = HOUR ( fact_rooftop_pv[INTERVAL_DATETIME] )
 
 Relate each `HOUR` column to `dim_hour[HOUR]` (many-to-one, single direction).
 
-Two more columns:
+One more column:
 
 ```
 -- Price for the same interval, so demand-weighted price is a plain SUMX
 fact_region_summary[RRP] =
     LOOKUPVALUE ( fact_price[RRP], fact_price[SETTLEMENTDATE], fact_region_summary[SETTLEMENTDATE] )
-
--- Marginal values of 100,000 or more are violation penalties, not prices (docs/decisions.md)
-fact_constraint[IS_PENALTY] = ABS ( fact_constraint[MARGINALVALUE] ) >= 100000
 ```
 
-Once `sagrid export` writes `IS_PENALTY` itself, delete the calculated column and use the exported one.
+If you added a calculated `IS_PENALTY` column from an earlier version of this guide, delete it after refreshing: the exported column replaces it.
 
 ## 3. Measures (DAX)
 
@@ -211,6 +218,13 @@ Avg Output MW =
 
 Avg Target MW =
     AVERAGEX ( VALUES ( fact_unit_solution[SETTLEMENTDATE] ), CALCULATE ( SUM ( fact_unit_solution[TOTALCLEARED] ) ) )
+
+-- the same, leaving out readings I3 marks as suspect
+Avg Output MW (clean) =
+    AVERAGEX (
+        VALUES ( fact_unit_scada[SETTLEMENTDATE] ),
+        CALCULATE ( SUM ( fact_unit_scada[SCADAVALUE] ), fact_unit_scada[IS_SUSPECT] <> TRUE () )
+    )
 ```
 
 Data quality:
@@ -220,6 +234,12 @@ Reject Count = COUNTROWS ( fact_rejects )
 Intervals Loaded = DISTINCTCOUNT ( fact_region_summary[SETTLEMENTDATE] )
 Expected Intervals = COUNTROWS ( dim_date ) * 288
 Completeness = DIVIDE ( [Intervals Loaded], [Expected Intervals] )
+
+Suspect Readings = CALCULATE ( COUNTROWS ( fact_unit_scada ), fact_unit_scada[IS_SUSPECT] = TRUE () )
+
+-- format as percentage; only readings that were screened count
+Suspect Share =
+    DIVIDE ( [Suspect Readings], CALCULATE ( COUNTROWS ( fact_unit_scada ), NOT ISBLANK ( fact_unit_scada[IS_SUSPECT] ) ) )
 ```
 
 ## 4. Pages
@@ -252,8 +272,9 @@ Use one canvas size (16:9), the same slicer panel on the left of every page (`di
    - Table: `dim_unit[STATION]`, `dim_unit[DUID]`, `dim_unit[FUEL]`, `dim_unit[REG_CAP_MW]`, Unit Energy GWh, Avg Output MW, Avg Target MW.
 
 6. **Data quality**: "Can the numbers on the other pages be trusted?"
-   - Cards: Completeness, Intervals Loaded, Reject Count.
+   - Cards: Completeness, Intervals Loaded, Reject Count, Suspect Readings, Suspect Share.
    - Table: `fact_rejects[dataset]`, `fact_rejects[reason]`, Reject Count.
+   - Matrix: rows `dim_unit[DUID]`, columns `fact_unit_scada[SCADA_ISSUE]` (filter out `none`), value count of rows. This is the I3 issues register in report form.
    - Text box: the summary printed by `sagrid check` for the same period (gaps, staleness, demand balance).
 
 7. **Notes**: data source (AEMO NEMWEB, © AEMO, used under AEMO's copyright permissions), the date range loaded, that timestamps are AEST market time, the definitions used (5 MW limit band, 100,000 penalty threshold, operational versus underlying demand), and the git commit `sagrid export` ran from.

@@ -23,13 +23,49 @@ def test_checks_pass_on_complete_fresh_day(store):
 
 
 def test_checks_fail_when_stale_and_incomplete(store):
-    load_day(store, n=100)
+    load_day(store, n=100)  # stops at 08:20, almost 16 hours before the end of the day
     checks = {
-        c.name: c for c in run_checks(store, D, D, 36, 0.01, 50, now_utc=datetime(2026, 10, 10))
+        c.name: c for c in run_checks(store, D, D, 12, 0.01, 50, now_utc=datetime(2026, 10, 10))
     }
     assert not checks["freshness"].passed
     assert not checks["completeness"].passed
     assert "188 missing" in checks["completeness"].detail
+
+
+def test_freshness_is_judged_at_the_end_of_a_past_window(store):
+    load_day(store)
+    checks = {
+        c.name: c for c in run_checks(store, D, D, 36, 0.01, 50, now_utc=datetime(2026, 11, 20))
+    }
+    assert checks["freshness"].passed, checks["freshness"].detail
+    assert "0.0 h before 2026-10-02 00:00" in checks["freshness"].detail
+
+
+def test_freshness_is_judged_at_now_while_the_window_is_open(store):
+    load_day(store, n=100)  # up to 08:20 market time
+    now_market_1820 = datetime(2026, 10, 1, 8, 20)  # 18:20 AEST
+    checks = {c.name: c for c in run_checks(store, D, D, 6, 0.01, 50, now_utc=now_market_1820)}
+    assert not checks["freshness"].passed
+    assert "10.0 h before 2026-10-01 18:20" in checks["freshness"].detail
+
+
+def test_heywood_check_reports_and_alerts_above_threshold(store):
+    load_day(store)
+    # Put Heywood at its import limit (-550 MW) for 6 intervals in a row.
+    store.con.execute(
+        "UPDATE interconnector SET MWFLOW = -548 WHERE INTERCONNECTORID = 'V-SA' "
+        "AND SETTLEMENTDATE > TIMESTAMP '2026-10-01 10:00' "
+        "AND SETTLEMENTDATE <= TIMESTAMP '2026-10-01 10:30'"
+    )
+    now = datetime(2026, 10, 1, 20)
+    hw = {c.name: c for c in run_checks(store, D, D, 36, 0.01, 50, now_utc=now)}["heywood_at_limit"]
+    assert hw.passed and "2.1% of 288" in hw.detail and "longest episode 30 min" in hw.detail
+    assert "import 2.1%" in hw.detail and "no alert threshold" in hw.detail
+    alert = {
+        c.name: c
+        for c in run_checks(store, D, D, 36, 0.01, 50, now_utc=now, heywood_max_at_limit_share=0.01)
+    }["heywood_at_limit"]
+    assert not alert.passed and "alert above 1.0%" in alert.detail
 
 
 def test_checks_when_no_data(store):
@@ -99,3 +135,73 @@ def test_store_adds_columns_new_releases_introduce(store):
     load_day(store, n=3)
     df = store.table("region_summary")
     assert df["SS_WIND_CLEAREDMW"].tolist() == [350.0] * 3
+
+
+def test_export_flags_suspect_readings_and_penalty_values(store, tmp_path):
+    from tests.conftest import scada_csv
+
+    load_day(store, n=12)
+    store.con.execute(
+        'UPDATE "constraint" SET MARGINALVALUE = -27000000 '
+        "WHERE SETTLEMENTDATE = TIMESTAMP '2026-10-01 00:10'"
+    )
+    # TORRB1 holds 700 MW for 20 intervals (stuck); HALLWF1 is not in the registry.
+    text = scada_csv(datetime(2026, 10, 1, 0, 5), n=20)
+    load_texts([("s.CSV", text)], [DATASETS["unit_scada"]], store, "run1", "s.zip")
+    reg = pd.DataFrame(
+        {
+            "DUID": ["TORRB1"],
+            "REGIONID": ["SA1"],
+            "DISPATCHTYPE": ["GENERATOR"],
+            "REG_CAP_MW": [800.0],
+        }
+    )
+    export_powerbi(store, tmp_path, reg)
+    scada = pd.read_parquet(tmp_path / "fact_unit_scada.parquet")
+    torrens = scada[scada["DUID"] == "TORRB1"]
+    assert (torrens["SCADA_ISSUE"] == "stuck").all() and torrens["IS_SUSPECT"].all()
+    hallett = scada[scada["DUID"] == "HALLWF1"]
+    assert hallett["SCADA_ISSUE"].isna().all() and hallett["IS_SUSPECT"].isna().all()
+
+    export_powerbi(store, tmp_path)  # no registry: nothing checked, nothing claimed clean
+    assert pd.read_parquet(tmp_path / "fact_unit_scada.parquet")["IS_SUSPECT"].isna().all()
+    con = pd.read_parquet(tmp_path / "fact_constraint.parquet").set_index("SETTLEMENTDATE")
+    assert con["IS_PENALTY"].sum() == 1 and con.loc["2026-10-01 00:10", "IS_PENALTY"].all()
+
+
+def test_flag_readings_prefers_the_most_severe_overlapping_issue():
+    from sagrid.investigations.i3_scada import flag_readings
+
+    t = pd.date_range("2026-10-01 00:05", periods=4, freq="5min")
+    scada = pd.DataFrame({"SETTLEMENTDATE": list(t) * 2, "DUID": ["A"] * 4 + ["B"] * 4})
+    issues = pd.DataFrame(
+        {
+            "DUID": ["A", "A", "A", "B"],
+            "ISSUE": ["stuck", "negative", "missing", "spike"],
+            "FIRST": [t[0], t[1], t[3], t[2]],
+            "LAST": [t[2], t[3], t[3], t[2]],
+            "SEVERITY": ["high", "low", "medium", "medium"],
+        }
+    )
+    got = flag_readings(scada, issues).tolist()
+    assert got == ["stuck", "stuck", "stuck", "negative", "", "", "spike", ""]
+
+
+def test_export_names_checked_clean_readings(store, tmp_path):
+    from tests.conftest import scada_csv
+
+    text = scada_csv(datetime(2026, 10, 1, 0, 5), n=5)  # too short to be stuck
+    load_texts([("s.CSV", text)], [DATASETS["unit_scada"]], store, "run1", "s.zip")
+    reg = pd.DataFrame(
+        {
+            "DUID": ["TORRB1"],
+            "REGIONID": ["SA1"],
+            "DISPATCHTYPE": ["GENERATOR"],
+            "REG_CAP_MW": [800.0],
+        }
+    )
+    export_powerbi(store, tmp_path, reg)
+    scada = pd.read_parquet(tmp_path / "fact_unit_scada.parquet").set_index("DUID")
+    assert (scada.loc["TORRB1", "SCADA_ISSUE"] == "none").all()
+    assert not scada.loc["TORRB1", "IS_SUSPECT"].any()
+    assert scada.loc["HALLWF1", "SCADA_ISSUE"].isna().all()
