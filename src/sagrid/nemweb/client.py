@@ -17,7 +17,7 @@ import re
 import time
 import zipfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -29,7 +29,7 @@ ALLOWED_HOSTS = {"nemweb.com.au", "www.nemweb.com.au"}
 BASE_URL = "https://nemweb.com.au"
 
 # Daily archives keep roughly the last 13 months; "Current" keeps the last day or two.
-REPORTS = {
+REPORTS: dict[str, dict[str, str | int]] = {
     "dispatchis": {
         "archive": "/Reports/Archive/DispatchIS_Reports/",
         "current": "/Reports/Current/DispatchIS_Reports/",
@@ -39,6 +39,16 @@ REPORTS = {
         "archive": "/Reports/Archive/Dispatch_SCADA/",
         "current": "/Reports/Current/Dispatch_SCADA/",
         "pattern": r"PUBLIC_DISPATCHSCADA_(\d{8})",
+    },
+    # Rooftop PV estimates are half-hourly. The archive holds one zip per
+    # week, named by its first day. A Current file is named by the end of
+    # its half hour, so the 00:00 file belongs to the previous day.
+    "rooftop_pv": {
+        "archive": "/Reports/Archive/ROOFTOP_PV/ACTUAL/",
+        "current": "/Reports/Current/ROOFTOP_PV/ACTUAL/",
+        "pattern": r"PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_(\d{8})(\d{6})?",
+        "archive_days": 7,
+        "name_marks_end_min": 30,
     },
 }
 
@@ -132,27 +142,35 @@ class NemwebClient:
     def files_for_dates(self, report: str, days: list[date]) -> list[tuple[str, str]]:
         """Pick the (url, name) for each requested day, trying the archive first."""
         spec = REPORTS[report]
-        pattern = re.compile(spec["pattern"])
+        pattern = re.compile(str(spec["pattern"]))
+        span = int(spec.get("archive_days", 1))
         wanted = {d.strftime("%Y%m%d") for d in days}
         picked: dict[str, list[tuple[str, str]]] = {}
 
-        # Archive: one zip per day. The pattern matches the leading YYYYMMDD,
-        # so it also matches the 5-minute names in Current (YYYYMMDDHHMM_...).
-        for name in self.list_files(spec["archive"]):
+        # Archive: one zip per day (or per week for some reports). The pattern
+        # matches the leading YYYYMMDD, so it also matches the 5-minute names
+        # in Current (YYYYMMDDHHMM_...).
+        for name in self.list_files(str(spec["archive"])):
             m = pattern.match(name)
-            if m and m.group(1) in wanted:
-                picked.setdefault(m.group(1), []).append(
-                    (urljoin(BASE_URL, spec["archive"] + name), name)
-                )
+            if not m:
+                continue
+            first = datetime.strptime(m.group(1), "%Y%m%d")
+            covered = {(first + timedelta(days=i)).strftime("%Y%m%d") for i in range(span)}
+            hits = sorted(covered & wanted)
+            if hits:
+                url = urljoin(BASE_URL, str(spec["archive"]) + name)
+                picked.setdefault(hits[0], []).append((url, name))
+                for d in hits[1:]:
+                    picked.setdefault(d, [])
 
         missing = wanted - picked.keys()
         if missing:
-            # Recent days are only published as 5-minute files in Current.
-            for name in self.list_files(spec["current"]):
+            # Recent days are only published as 5-minute (or 30-minute) files in Current.
+            for name in self.list_files(str(spec["current"])):
                 m = pattern.match(name)
-                if m and m.group(1) in missing:
-                    picked.setdefault(m.group(1), []).append(
-                        (urljoin(BASE_URL, spec["current"] + name), name)
+                if m and _current_day(m, spec) in missing:
+                    picked.setdefault(_current_day(m, spec), []).append(
+                        (urljoin(BASE_URL, str(spec["current"]) + name), name)
                     )
 
         for d in sorted(wanted - picked.keys()):
@@ -176,6 +194,15 @@ class NemwebClient:
         tmp.replace(path)  # atomic: a crash never leaves a half-written cache file
         sidecar.write_text(digest)
         return FetchedFile(name, url, path, digest, False)
+
+
+def _current_day(m: re.Match, spec: dict) -> str:
+    """The market day a Current file belongs to."""
+    shift = int(spec.get("name_marks_end_min", 0))
+    if not shift or m.lastindex is None or m.lastindex < 2 or m.group(2) is None:
+        return m.group(1)
+    stamp = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    return (stamp - timedelta(minutes=shift)).strftime("%Y%m%d")
 
 
 def iter_csv_texts(zip_bytes: bytes, depth: int = 0):

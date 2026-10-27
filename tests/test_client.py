@@ -149,3 +149,34 @@ def test_rejects_oversized_member(monkeypatch):
 def test_bad_zip_raises():
     with pytest.raises(zipfile.BadZipFile):
         list(iter_csv_texts(io.BytesIO(b"nope").getvalue()))
+
+
+@responses.activate
+def test_weekly_archive_covers_seven_days_and_current_half_hours(tmp_path):
+    from datetime import date
+
+    base = BASE_URL + "/Reports/{}/ROOFTOP_PV/ACTUAL/"
+    responses.get(
+        base.format("Archive"),
+        body=listing(
+            "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261001.zip",
+            "PUBLIC_ROOFTOP_PV_ACTUAL_SATELLITE_20261001.zip",
+        ),
+    )
+    responses.get(
+        base.format("Current"),
+        body=listing(
+            "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261008233000_0000000001.zip",
+            "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261009000000_0000000002.zip",
+            "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261009003000_0000000003.zip",
+        ),
+    )
+    c = NemwebClient(tmp_path, retries=0)
+    names = [n for _, n in c.files_for_dates("rooftop_pv", [date(2026, 10, 3), date(2026, 10, 8)])]
+    # 3 Oct comes from the weekly zip starting 1 Oct; 8 Oct from Current, where
+    # the file named 00:00 on the 9th holds the last half hour of the 8th.
+    assert names == [
+        "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261001.zip",
+        "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261008233000_0000000001.zip",
+        "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261009000000_0000000002.zip",
+    ]

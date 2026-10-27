@@ -7,7 +7,7 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 ### Added
 - NEMWEB download client: host allowlist, file name sanitisation, retries with backoff, checksum cache, zip size and nesting guards.
 - Parser for AEMO's multi-table CSV format that records malformed rows instead of failing the file.
-- Typed, validated datasets (region summary, SA dispatch prices, interconnectors, constraints, unit SCADA) with a rejects table.
+- Typed, validated datasets (region summary, SA dispatch prices, interconnectors, constraints, SA rooftop PV, unit SCADA) with a rejects table.
 - DuckDB storage with idempotent upserts, loaded-file tracking and run manifests.
 - 5-minute interval grid, gap detection and aggregates with coverage.
 - Region balance and SCADA-vs-dispatch reconciliation checks.

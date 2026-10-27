@@ -65,12 +65,14 @@ def export_powerbi(store: Store, out_dir: Path, registry: pd.DataFrame | None = 
     written: list[Path] = []
     existing = {r[0] for r in store.con.execute("SHOW TABLES").fetchall()}
     all_ts = []
-    for name in DATASETS:
+    for name, ds in DATASETS.items():
         if name not in existing:
             continue
         df = store.table(name)
-        df["DATE"] = (df["SETTLEMENTDATE"] - pd.Timedelta(minutes=5)).dt.normalize()
-        all_ts.append(df["SETTLEMENTDATE"])
+        # An interval-ending stamp at 00:00 belongs to the previous day.
+        shift = pd.Timedelta(minutes=5) if ds.time_marks == "end" else pd.Timedelta(0)
+        df["DATE"] = (df[ds.time_col] - shift).dt.normalize()
+        all_ts.append(df["DATE"] + pd.Timedelta(minutes=5))  # date_dimension takes interval ends
         written += _write(df, out_dir, f"fact_{name}")
     if all_ts:
         written += _write(date_dimension(pd.concat(all_ts)), out_dir, "dim_date")

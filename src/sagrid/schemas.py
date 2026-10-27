@@ -28,6 +28,8 @@ class Dataset:
     key: tuple[str, ...]
     schema: pa.DataFrameSchema
     row_filter: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    time_col: str = "SETTLEMENTDATE"
+    time_marks: str = "end"  # whether time_col marks the end or the start of the interval
 
 
 def _num(lo: float | None = None, hi: float | None = None, nullable: bool = False) -> pa.Column:
@@ -170,6 +172,36 @@ PRICE = Dataset(
     ),
 )
 
+# AEMO publishes two rooftop PV estimates: MEASUREMENT (from metered
+# systems, quality indicator 1) and SATELLITE (QI 0.6). We keep MEASUREMENT
+# only, so each half hour has one value (see docs/decisions.md).
+ROOFTOP_PV = Dataset(
+    name="rooftop_pv",
+    source_table="ROOFTOP_ACTUAL",
+    report="rooftop_pv",
+    columns={
+        "INTERVAL_DATETIME": "datetime",
+        "REGIONID": "str",
+        "TYPE": "str",
+        "POWER": "float",
+        "QI": "float",
+    },
+    key=("INTERVAL_DATETIME", "REGIONID", "TYPE"),
+    row_filter={"REGIONID": (SA_REGION,), "TYPE": ("MEASUREMENT",)},
+    schema=pa.DataFrameSchema(
+        {
+            "INTERVAL_DATETIME": TS,
+            "REGIONID": pa.Column(str, pa.Check.isin([SA_REGION])),
+            "TYPE": pa.Column(str, pa.Check.isin(["MEASUREMENT"])),
+            "POWER": _num(0, 5000),
+            "QI": _num(0, 1, nullable=True),
+        },
+        unique=["INTERVAL_DATETIME", "REGIONID", "TYPE"],
+    ),
+    time_col="INTERVAL_DATETIME",
+    time_marks="start",
+)
+
 UNIT_SCADA = Dataset(
     name="unit_scada",
     source_table="DISPATCH_UNIT_SCADA",
@@ -186,7 +218,9 @@ UNIT_SCADA = Dataset(
     ),
 )
 
-DATASETS = {d.name: d for d in (REGIONSUM, PRICE, INTERCONNECTOR, CONSTRAINT, UNIT_SCADA)}
+DATASETS = {
+    d.name: d for d in (REGIONSUM, PRICE, INTERCONNECTOR, CONSTRAINT, ROOFTOP_PV, UNIT_SCADA)
+}
 
 
 def select_and_type(raw: pd.DataFrame, ds: Dataset) -> tuple[pd.DataFrame, pd.DataFrame]:

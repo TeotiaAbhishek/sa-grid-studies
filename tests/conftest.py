@@ -87,6 +87,22 @@ def scada_csv(start: datetime, n: int = 1) -> str:
     return "\n".join(lines) + "\n"
 
 
+def rooftop_csv(period_end: datetime, n: int = 1, power: float = 1200.0) -> str:
+    """Half-hourly rooftop PV file. INTERVAL_DATETIME is the START of the half hour."""
+    lines = [
+        "C,NEMP.WORLD,ROOFTOP_PV_ACTUAL_MEASUREMENT,AEMO,PUBLIC,2026/10/01,00:00:04,1,DEMAND,1",
+        "I,ROOFTOP,ACTUAL,2,INTERVAL_DATETIME,REGIONID,POWER,QI,TYPE,LASTCHANGED",
+    ]
+    for i in range(n):
+        start = period_end + timedelta(minutes=30 * i) - timedelta(minutes=30)
+        t = ts(start)
+        lines.append(f"D,ROOFTOP,ACTUAL,2,{t},SA1,{power},1,MEASUREMENT,{t}")
+        lines.append(f"D,ROOFTOP,ACTUAL,2,{t},SA1,{power + 200},0.6,SATELLITE,{t}")
+        lines.append(f"D,ROOFTOP,ACTUAL,2,{t},VIC1,3000,1,MEASUREMENT,{t}")
+    lines.append(f'C,"END OF REPORT",{len(lines) + 1}')
+    return "\n".join(lines) + "\n"
+
+
 def zip_of(members: dict[str, bytes]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -95,11 +111,13 @@ def zip_of(members: dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
-def daily_archive(day: datetime, csv_builder, prefix: str, n: int = 288) -> bytes:
-    """A zip of 5-minute zips, like NEMWEB's daily archive files."""
+def daily_archive(
+    day: datetime, csv_builder, prefix: str, n: int = 288, step_min: int = 5
+) -> bytes:
+    """A zip of 5-minute (or 30-minute) zips, like NEMWEB's archive files."""
     inner = {}
     for i in range(n):
-        t = day + timedelta(minutes=5 * (i + 1))
+        t = day + timedelta(minutes=step_min * (i + 1))
         name = f"{prefix}_{t:%Y%m%d%H%M}_0000000{i:09d}"
         inner[name + ".zip"] = zip_of({name + ".CSV": csv_builder(t, 1).encode()})
     return zip_of(inner)
