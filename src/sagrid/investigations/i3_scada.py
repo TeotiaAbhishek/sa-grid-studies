@@ -206,7 +206,7 @@ def screen_units(
             evidence = f"held at {seg.iloc[0]:.3f} MW for {5 * len(seg)} minutes"
             if tgt is not None:
                 # readings stamped t answer the targets of the interval before
-                answered = tgt.reindex(seg.index - SCADA_LAG).dropna()
+                answered = tgt.reindex(pd.DatetimeIndex(seg.index) - SCADA_LAG).dropna()
                 if len(answered) and (
                     answered.max() - answered.min() <= tol
                     and abs(seg.iloc[0] - answered.mean()) <= tol
@@ -241,7 +241,7 @@ def screen_units(
                         if off[span].sum() < OFF_TARGET_MIN_INTERVALS:
                             continue
                         in_episode[span] = True
-                        target = tgt[span - SCADA_LAG].mean()
+                        target = tgt[pd.DatetimeIndex(span) - SCADA_LAG].mean()
                         issues.append(
                             _issue(
                                 duid,
@@ -258,11 +258,11 @@ def screen_units(
             # A semi-scheduled target is a forecast, so one interval away from it is
             # usually weather (a passing cloud or a gust), not telemetry.
             kind = "brief_departure" if semi else "spike"
-            g = gap.dropna()
-            for t in g[find_spikes(g, cap, baseline=0.0)].index:
+            gp = gap.dropna()
+            for t in gp[find_spikes(gp, cap, baseline=0.0)].index:
                 if in_episode.get(t, False):
                     continue
-                before, after = g.shift(1).get(t, np.nan), g.shift(-1).get(t, np.nan)
+                before, after = gp.shift(1).get(t, np.nan), gp.shift(-1).get(t, np.nan)
                 avail = (
                     unit_targets["AVAILABILITY"].get(t - SCADA_LAG, np.nan)
                     if unit_targets is not None
@@ -277,7 +277,7 @@ def screen_units(
                         t,
                         1,
                         f"{full[t]:.1f} MW against a target of {tgt[t - SCADA_LAG]:.1f} MW; "
-                        f"off target by {g[t]:.1f} MW against {before:.1f} and {after:.1f} "
+                        f"off target by {gp[t]:.1f} MW against {before:.1f} and {after:.1f} "
                         f"either side{note}",
                     )
                 )
