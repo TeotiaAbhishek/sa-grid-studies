@@ -132,6 +132,14 @@ def load_synthetic_week(store, seed=1):
                 }
             ),
             pd.DataFrame({"SETTLEMENTDATE": t, "CONSTRAINTID": "N>NEVER", "MARGINALVALUE": 0.0}),
+            # Binds at random: nothing in the inputs explains it.
+            pd.DataFrame(
+                {
+                    "SETTLEMENTDATE": t,
+                    "CONSTRAINTID": "S>RANDOM",
+                    "MARGINALVALUE": np.where(rng.random(n) < 0.2, -5.0, 0.0),
+                }
+            ),
         ]
     ).assign(INTERVENTION=0, RHS=100.0, LHS=100.0, VIOLATIONDEGREE=0.0)
     put("constraint", con)
@@ -256,15 +264,19 @@ def test_interval_frame_aligns_rooftop_half_hours(week):
 def test_i1_ranks_classifies_and_finds_the_planted_driver(week):
     rep = i1_constraints.run(week, W)
     nb = rep.numbers
-    assert nb["constraints_binding"] == 3
+    assert nb["constraints_binding"] == 4
     assert nb["penalty_constraints"] == ["VT_PEN"]
     assert nb["top"][0]["CONSTRAINTID"] == "F_TEST"
     assert nb["top"][0]["CATEGORY"] == "Frequency control (FCAS)"
-    (model,) = nb["models"]
-    assert model["constraint"] == "S>TEST_SA"
+    models = {m["constraint"]: m for m in nb["models"]}
+    assert set(models) == {"S>TEST_SA", "S>RANDOM"}
+    assert not models["S>RANDOM"]["useful"]
+    assert "does little better than chance" in rep.markdown
+    assert "best-explained SA constraint (held-out AUC" in rep.markdown
+    model = models["S>TEST_SA"]
     odds = {r["INPUT"]: r for r in model["odds"]}
     assert odds["Rooftop PV"]["ODDS_RATIO_PER_SD"] > 1
-    assert model["cv_auc_mean"] > 0.8
+    assert model["cv_auc_mean"] > 0.8 and model["useful"]
     assert "## Limitations" in rep.markdown and "## Recommended response" in rep.markdown
 
 
@@ -354,6 +366,7 @@ def test_cli_investigate(tmp_path, monkeypatch, capsys):
         ("V_S_6CGH_SA_UFLS", "SA network"),
         ("L_PEC_X_6C_6G_6H", "SA network"),
         ("V::S_NIL_MAXG_AUTO", "SA network"),
+        ("V_SH_DD_MAC_FLT_965", "Other region or system"),
         ("F_T+RREG_0050", "Frequency control (FCAS)"),
         ("Q>NIL_CPWU_CLWU_RAD", "Other region or system"),
         ("N>>N-NIL_TX", "Other region or system"),
