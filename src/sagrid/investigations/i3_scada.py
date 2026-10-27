@@ -21,7 +21,7 @@ from sagrid.investigations.common import (
     snapshot,
     snapshot_md,
 )
-from sagrid.reconcile import scada_vs_dispatch
+from sagrid.reconcile import SCADA_LAG, scada_vs_dispatch
 from sagrid.store import Store
 
 TABLES = ("region_summary", "unit_scada")
@@ -257,6 +257,8 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
             "no unit_scada rows in the window; run sagrid ingest --datasets unit_scada"
         )
     rs = read_window(store, "region_summary", w)
+    # The reading at the end of the window's last interval is stamped one interval later.
+    scada_end = read_window(store, "unit_scada", w, extend=SCADA_LAG)
     snap = snapshot(store, w, list(TABLES))
 
     units = registry[registry["REGIONID"] == "SA1"].copy()
@@ -282,7 +284,9 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
     )
 
     recon = (
-        scada_vs_dispatch(rs, scada, registry).sort_values("SETTLEMENTDATE").reset_index(drop=True)
+        scada_vs_dispatch(rs, scada_end, registry)
+        .sort_values("SETTLEMENTDATE")
+        .reset_index(drop=True)
     )
     resid = recon["residual_mw"]
     cps = change_points(resid.fillna(resid.median()))

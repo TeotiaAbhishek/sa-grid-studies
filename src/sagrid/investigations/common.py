@@ -55,8 +55,10 @@ def tables_in(store: Store) -> set[str]:
     return {r[0] for r in store.con.execute("SHOW TABLES").fetchall()}
 
 
-def read_window(store: Store, table: str, w: Window) -> pd.DataFrame:
-    """Rows of a dataset table whose interval falls inside the window."""
+def read_window(
+    store: Store, table: str, w: Window, extend: timedelta = timedelta(0)
+) -> pd.DataFrame:
+    """Rows of a dataset table whose interval falls inside the window (plus `extend` after it)."""
     ds = DATASETS[table]
     col = ident(ds.time_col.lower()).upper()
     if ds.time_marks == "end":
@@ -64,7 +66,7 @@ def read_window(store: Store, table: str, w: Window) -> pd.DataFrame:
     else:
         cond = f'"{col}" >= ? AND "{col}" < ?'
     sql = f'SELECT * FROM "{ident(table)}" WHERE {cond} ORDER BY ALL'  # noqa: S608 - checked
-    return store.con.execute(sql, [w.lo, w.hi]).df()
+    return store.con.execute(sql, [w.lo, w.hi + extend]).df()
 
 
 def snapshot(store: Store, w: Window, tables: list[str]) -> dict:

@@ -26,7 +26,7 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 - The registry left capacity and fuel blank for 170 units across the NEM (27 in SA, including Osborne, Pelican Point and Quarantine), because it took the latest date and highest version separately. It now takes the latest effective date, then the highest version on that date.
 - `sagrid registry` also reads older MMSDM months, which use `PUBLIC_DVD_<TABLE>_<month>.zip` file names.
 - Reloading a file left its earlier rejects in place, so `sagrid check` kept counting rows that now load. A reload now replaces that file's rejects.
-- The SCADA-vs-dispatch check left out battery output, which dispatched generation includes, and counted non-scheduled units, which it does not.
+- The SCADA-vs-dispatch check left out battery output, which dispatched generation includes, and counted non-scheduled units, which it does not. It also compared each target with the reading from the start of the interval; it now uses the reading at the end.
 - Tests read a real `data/registry.csv` or `sagrid.toml` from the working folder; each test now runs in its own folder with no `SAGRID_*` settings.
 
 ## [0.0.1] - 2026-10-27
