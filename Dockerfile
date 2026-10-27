@@ -8,6 +8,8 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
+# Create the data directory as the app user so the volume is writable.
+RUN mkdir -p /home/sagrid/data && chown -R sagrid:sagrid /home/sagrid
 USER sagrid
 WORKDIR /home/sagrid
 VOLUME ["/home/sagrid/data"]
