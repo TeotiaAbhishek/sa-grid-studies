@@ -135,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
                 s.max_staleness_hours,
                 s.max_reject_rate,
                 s.balance_tolerance_mw,
+                heywood_max_at_limit_share=s.heywood_max_at_limit_share,
             )
             print(as_json(checks) if args.json else report(checks))
             return EXIT_OK if all(c.passed for c in checks) else EXIT_CHECKS_FAILED

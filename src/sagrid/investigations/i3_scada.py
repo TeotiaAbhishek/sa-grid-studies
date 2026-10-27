@@ -58,6 +58,9 @@ RESPONSES = {
     "tripped or its telemetry dropped to zero; check the unit's availability and AEMO market "
     "notices, then raise it with the participant.",
 }
+# Issues that make a reading itself untrustworthy. The others describe what the
+# unit did (a trip, a unit off target) or a missing reading, not a bad value.
+SUSPECT_KINDS = ("stuck", "spike", "above_capacity")
 SEVERITY = {
     "stuck": "high",
     "above_capacity": "high",
@@ -221,7 +224,6 @@ def screen_units(
             issues.append(_issue(duid, "stuck", seg.index[0], seg.index[-1], len(seg), evidence))
 
         if tgt is not None:
-            gap = pd.Series(end - tgt.to_numpy(), index=grid + SCADA_LAG).dropna()
             semi = schedule.get(duid) == "SEMI-SCHEDULED"
             gap = pd.Series(end - tgt.to_numpy(), index=grid + SCADA_LAG)
             limit = max(SPIKE_MIN_MW, 0.1 * cap) if cap else SPIKE_MIN_MW
@@ -351,6 +353,36 @@ def screen_units(
     return out, notes
 
 
+def sa_units(registry: pd.DataFrame) -> pd.DataFrame:
+    """SA generating units and batteries: the units I3 screens."""
+    units = registry[registry["REGIONID"] == "SA1"]
+    return units[units["DISPATCHTYPE"].isin(["GENERATOR", "BIDIRECTIONAL"])].copy()
+
+
+def flag_readings(scada: pd.DataFrame, issues: pd.DataFrame) -> pd.Series:
+    """The issue each SCADA reading falls inside, or "" for none.
+
+    Where issues overlap, the most severe wins. "missing" covers readings
+    that don't exist, so it never labels one.
+    """
+    labels = np.full(len(scada), "", dtype=object)
+    found = issues[issues["ISSUE"] != "missing"]
+    rank = {"low": 0, "medium": 1, "high": 2}
+    found = found.sort_values("SEVERITY", key=lambda s: s.map(rank), kind="stable")
+    rows = scada.groupby("DUID").indices
+    stamps = pd.DatetimeIndex(scada["SETTLEMENTDATE"])
+    for duid, kind, first, last in found[["DUID", "ISSUE", "FIRST", "LAST"]].itertuples(
+        index=False
+    ):
+        pos = rows.get(duid)
+        if pos is None:
+            continue
+        t = stamps[pos]
+        # later rows are more severe, so they overwrite
+        labels[pos[(t >= pd.Timestamp(first)) & (t <= pd.Timestamp(last))]] = kind
+    return pd.Series(labels, index=scada.index, dtype=object)
+
+
 def _issue(duid, kind, first, last, n, evidence) -> dict:
     return {
         "DUID": duid,
@@ -398,8 +430,7 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
         targets = None
     snap = snapshot(store, w, list(TABLES))
 
-    units = registry[registry["REGIONID"] == "SA1"].copy()
-    units = units[units["DISPATCHTYPE"].isin(["GENERATOR", "BIDIRECTIONAL"])]
+    units = sa_units(registry)
     sa = scada[scada["DUID"].isin(units["DUID"])]
     reporting = sa["DUID"].nunique()
     grid = pd.date_range(w.lo + pd.Timedelta(minutes=5), w.hi, freq="5min")

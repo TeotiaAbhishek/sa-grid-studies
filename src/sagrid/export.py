@@ -1,6 +1,8 @@
 """Power BI exports: a small star schema as Parquet and CSV.
 
-Facts: one table per dataset at 5-minute grain.
+Facts: one table per dataset at 5-minute grain. Unit SCADA readings carry
+the I3 issue they fall in (SCADA_ISSUE) and IS_SUSPECT, so a report can mask
+bad readings instead of losing them. Constraint rows carry IS_PENALTY.
 Dimensions: date (one row per day), unit (from the registry), interconnector.
 Power BI loads these directly; no Power Query transformation is needed.
 """
@@ -11,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from sagrid.investigations.i1_constraints import PENALTY_MV
+from sagrid.investigations.i3_scada import SUSPECT_KINDS, flag_readings, sa_units, screen_units
 from sagrid.schemas import DATASETS
 from sagrid.store import Store
 
@@ -61,6 +65,38 @@ def date_dimension(timestamps: pd.Series) -> pd.DataFrame:
     return d
 
 
+def scada_flags(
+    store: Store, scada: pd.DataFrame, registry: pd.DataFrame | None
+) -> tuple[pd.Series, pd.Series]:
+    """I3's issue and a suspect flag for each reading, by the same rules as I3.
+
+    Readings I3 doesn't screen (no registry, or a unit outside SA) get blanks
+    (null), not False, so "not checked" is never read as "checked and fine".
+    """
+    issue = pd.Series(pd.NA, index=scada.index, dtype="string")
+    suspect = pd.Series(pd.NA, index=scada.index, dtype="boolean")
+    if registry is None:
+        return issue, suspect
+    units = sa_units(registry)
+    checked = scada["DUID"].isin(units["DUID"])
+    sa = scada[checked]
+    if sa.empty:
+        return issue, suspect
+    grid = pd.date_range(sa["SETTLEMENTDATE"].min(), sa["SETTLEMENTDATE"].max(), freq="5min")
+    targets = None
+    if "unit_solution" in {r[0] for r in store.con.execute("SHOW TABLES").fetchall()}:
+        targets = store.con.execute(
+            "SELECT SETTLEMENTDATE, DUID, TOTALCLEARED, AVAILABILITY FROM unit_solution"
+        ).df()
+        targets = targets[targets["DUID"].isin(units["DUID"])]
+        targets = targets if len(targets) else None
+    issues, _ = screen_units(sa, units, grid, targets)
+    found = flag_readings(scada, issues)
+    issue[checked] = found[checked]
+    suspect[checked] = found[checked].isin(SUSPECT_KINDS)
+    return issue, suspect
+
+
 def export_powerbi(store: Store, out_dir: Path, registry: pd.DataFrame | None = None) -> list[Path]:
     written: list[Path] = []
     existing = {r[0] for r in store.con.execute("SHOW TABLES").fetchall()}
@@ -72,6 +108,10 @@ def export_powerbi(store: Store, out_dir: Path, registry: pd.DataFrame | None = 
         # An interval-ending stamp at 00:00 belongs to the previous day.
         shift = pd.Timedelta(minutes=5) if ds.time_marks == "end" else pd.Timedelta(0)
         df["DATE"] = (df[ds.time_col] - shift).dt.normalize()
+        if name == "unit_scada":
+            df["SCADA_ISSUE"], df["IS_SUSPECT"] = scada_flags(store, df, registry)
+        if name == "constraint":
+            df["IS_PENALTY"] = df["MARGINALVALUE"].abs() >= PENALTY_MV
         all_ts.append(df["DATE"] + pd.Timedelta(minutes=5))  # date_dimension takes interval ends
         written += _write(df, out_dir, f"fact_{name}")
     if all_ts:

@@ -12,3 +12,6 @@ timeout_s = 60.0
 max_reject_rate = 0.01
 max_staleness_hours = 36.0
 balance_tolerance_mw = 1.0
+# Alert when Heywood is at a transfer limit in more than this share of the
+# checked intervals. Unset: `sagrid check` reports the share but never fails on it.
+# heywood_max_at_limit_share = 0.5
