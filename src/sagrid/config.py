@@ -26,7 +26,7 @@ class Settings:
     timeout_s: float = 60.0
     max_reject_rate: float = 0.01
     max_staleness_hours: float = 36.0
-    balance_tolerance_mw: float = 50.0
+    balance_tolerance_mw: float = 1.0
 
 
 def _coerce(name: str, value, target):
