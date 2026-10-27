@@ -5,23 +5,24 @@ Check 1 (region balance), from DISPATCH_REGIONSUM alone:
     TOTALDEMAND ~= DISPATCHABLEGENERATION - DISPATCHABLELOAD - NETINTERCHANGE
 
 NETINTERCHANGE is the region's net export (positive = SA exporting).
-The two sides differ by the region's share of interconnector losses, so we
-allow a tolerance and flag intervals outside it.
+On real data (first week, Oct 2026) the two sides agree to within 0.01 MW,
+so a 1 MW tolerance flags any parsing or typing error. Because AEMO
+computes TOTALDEMAND this way, this is a consistency check; check 2 is
+the independent one.
 
 Check 2 (SCADA vs dispatch), needs the unit registry:
 
     sum of SA generating units' SCADA output ~= DISPATCHABLEGENERATION
 
 SCADA is metered output and dispatch is a target, so this tolerance is wider.
-Both tolerances are documented in docs/decisions.md and should be tuned
-from real data, not guessed.
+Both tolerances and the evidence behind them are in docs/decisions.md.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-BALANCE_TOLERANCE_MW = 50.0
+BALANCE_TOLERANCE_MW = 1.0
 SCADA_TOLERANCE_MW = 150.0
 
 
