@@ -26,7 +26,7 @@ Create the relationships in Model view as single-direction, many-to-one from eac
 
 | Table | Column | Meaning |
 | --- | --- | --- |
-| `fact_unit_scada` | `SCADA_ISSUE` | The I3 issue this reading falls in (`stuck`, `spike`, `above_capacity`, `no_response`, `off_target`, `brief_departure`, `negative`), or empty. Blank when the reading wasn't screened (no registry, or a unit outside SA) |
+| `fact_unit_scada` | `SCADA_ISSUE` | The I3 issue this reading falls in (`stuck`, `spike`, `above_capacity`, `no_response`, `off_target`, `brief_departure`, `negative`), or `none` when it was checked and nothing was found. Blank when the reading wasn't screened (no registry, or a unit outside SA) |
 | `fact_unit_scada` | `IS_SUSPECT` | True for stuck, spike and above-capacity readings: the value itself is likely wrong. Blank when not screened |
 | `fact_constraint` | `IS_PENALTY` | True when the marginal value is 100,000 or more in size: a violated constraint, not a market price. Leave these out of price-based measures |
 

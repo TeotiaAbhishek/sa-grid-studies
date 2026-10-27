@@ -185,3 +185,23 @@ def test_flag_readings_prefers_the_most_severe_overlapping_issue():
     )
     got = flag_readings(scada, issues).tolist()
     assert got == ["stuck", "stuck", "stuck", "negative", "", "", "spike", ""]
+
+
+def test_export_names_checked_clean_readings(store, tmp_path):
+    from tests.conftest import scada_csv
+
+    text = scada_csv(datetime(2026, 10, 1, 0, 5), n=5)  # too short to be stuck
+    load_texts([("s.CSV", text)], [DATASETS["unit_scada"]], store, "run1", "s.zip")
+    reg = pd.DataFrame(
+        {
+            "DUID": ["TORRB1"],
+            "REGIONID": ["SA1"],
+            "DISPATCHTYPE": ["GENERATOR"],
+            "REG_CAP_MW": [800.0],
+        }
+    )
+    export_powerbi(store, tmp_path, reg)
+    scada = pd.read_parquet(tmp_path / "fact_unit_scada.parquet").set_index("DUID")
+    assert (scada.loc["TORRB1", "SCADA_ISSUE"] == "none").all()
+    assert not scada.loc["TORRB1", "IS_SUSPECT"].any()
+    assert scada.loc["HALLWF1", "SCADA_ISSUE"].isna().all()

@@ -70,8 +70,9 @@ def scada_flags(
 ) -> tuple[pd.Series, pd.Series]:
     """I3's issue and a suspect flag for each reading, by the same rules as I3.
 
-    Readings I3 doesn't screen (no registry, or a unit outside SA) get blanks
-    (null), not False, so "not checked" is never read as "checked and fine".
+    Checked readings with no issue are "none". Readings I3 doesn't screen (no
+    registry, or a unit outside SA) get blanks (null), not "none" or False, so
+    "not checked" is never read as "checked and fine".
     """
     issue = pd.Series(pd.NA, index=scada.index, dtype="string")
     suspect = pd.Series(pd.NA, index=scada.index, dtype="boolean")
@@ -92,7 +93,8 @@ def scada_flags(
         targets = targets if len(targets) else None
     issues, _ = screen_units(sa, units, grid, targets)
     found = flag_readings(scada, issues)
-    issue[checked] = found[checked]
+    # Power BI shows both "" and null as (Blank), so name the clean state.
+    issue[checked] = found[checked].replace("", "none")
     suspect[checked] = found[checked].isin(SUSPECT_KINDS)
     return issue, suspect
 
