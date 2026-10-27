@@ -13,7 +13,10 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 - Region balance and SCADA-vs-dispatch reconciliation checks.
 - `sagrid` CLI: ingest, backfill, check, export, status.
 - Power BI star-schema exports.
-- CI on Windows and Linux with lint, format, coverage gate and dependency audit.
+- CI on Windows and Linux with lint, format, type checking (mypy), coverage gate and dependency audit.
+- Nightly ingest workflow with health checks and automatic alert issues.
+- Dockerfile (non-root) with a CI smoke test, and a tag-driven release workflow.
+- Live-data integration test (`pytest -m network`).
 
 ## [0.0.1] - 2026-10-27
 ### Added
