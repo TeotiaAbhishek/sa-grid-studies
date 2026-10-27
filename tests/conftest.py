@@ -1,0 +1,102 @@
+"""Test helpers that build small files in AEMO's multi-table CSV format.
+
+These fixtures are constructed for testing, following the published MMS
+file layout. They are not real AEMO data; the real-data check is the
+integration test in tests/test_integration_real.py.
+"""
+
+from __future__ import annotations
+
+import io
+import zipfile
+from datetime import datetime, timedelta
+
+import pytest
+
+from sagrid.store import Store
+
+REGIONSUM_COLS = (
+    "SETTLEMENTDATE,RUNNO,REGIONID,DISPATCHINTERVAL,INTERVENTION,TOTALDEMAND,"
+    "DEMAND_AND_NONSCHEDGEN,DISPATCHABLEGENERATION,DISPATCHABLELOAD,"
+    "NETINTERCHANGE,TOTALINTERMITTENTGENERATION"
+)
+IC_COLS = (
+    "SETTLEMENTDATE,RUNNO,INTERCONNECTORID,DISPATCHINTERVAL,INTERVENTION,MWFLOW,"
+    "METEREDMWFLOW,MWLOSSES,EXPORTLIMIT,IMPORTLIMIT"
+)
+CON_COLS = (
+    "SETTLEMENTDATE,RUNNO,CONSTRAINTID,DISPATCHINTERVAL,INTERVENTION,RHS,"
+    "MARGINALVALUE,VIOLATIONDEGREE,LHS"
+)
+
+
+def ts(dt: datetime) -> str:
+    return dt.strftime('"%Y/%m/%d %H:%M:%S"')
+
+
+def dispatchis_csv(
+    start: datetime,
+    n: int = 1,
+    footer: bool = True,
+    demand: float = 1500.0,
+    extra_rows: list[str] | None = None,
+) -> str:
+    lines = ["C,NEMP.WORLD,DISPATCHIS,AEMO,PUBLIC,2026/10/01,00:00:05,1,DISPATCHIS,1"]
+    lines.append("I,DISPATCH,REGIONSUM,9," + REGIONSUM_COLS)
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        # gen 1300 - load 0 - netinterchange(-200, i.e. importing 200) = demand 1500
+        lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,SA1,1,0,{demand},1550,1300,0,-200,600")
+        lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,VIC1,1,0,5000,5100,5200,0,200,900")
+    lines.append("I,DISPATCH,INTERCONNECTORRES,3," + IC_COLS)
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        lines.append(f"D,DISPATCH,INTERCONNECTORRES,3,{t},1,V-SA,1,0,150,148,5,600,-550")
+        lines.append(f"D,DISPATCH,INTERCONNECTORRES,3,{t},1,V-S-MNSP1,1,0,50,49,1,220,-200")
+        lines.append(f"D,DISPATCH,INTERCONNECTORRES,3,{t},1,N-Q-MNSP1,1,0,10,9,0,100,-100")
+    lines.append("I,DISPATCH,CONSTRAINT,5," + CON_COLS)
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        lines.append(f"D,DISPATCH,CONSTRAINT,5,{t},1,S>>V_TEST_1,1,0,500,-12.5,0,500")
+    lines += extra_rows or []
+    if footer:
+        lines.append(f'C,"END OF REPORT",{len(lines) + 1}')
+    return "\n".join(lines) + "\n"
+
+
+def scada_csv(start: datetime, n: int = 1) -> str:
+    lines = [
+        "C,NEMP.WORLD,DISPATCHSCADA,AEMO,PUBLIC,2026/10/01,00:00:05,1,DISPATCHSCADA,1",
+        "I,DISPATCH,UNIT_SCADA,1,SETTLEMENTDATE,DUID,SCADAVALUE,LASTCHANGED",
+    ]
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        lines.append(f"D,DISPATCH,UNIT_SCADA,1,{t},TORRB1,700,{t}")
+        lines.append(f"D,DISPATCH,UNIT_SCADA,1,{t},HALLWF1,600,{t}")
+    lines.append(f'C,"END OF REPORT",{len(lines) + 1}')
+    return "\n".join(lines) + "\n"
+
+
+def zip_of(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def daily_archive(day: datetime, csv_builder, prefix: str, n: int = 288) -> bytes:
+    """A zip of 5-minute zips, like NEMWEB's daily archive files."""
+    inner = {}
+    for i in range(n):
+        t = day + timedelta(minutes=5 * (i + 1))
+        name = f"{prefix}_{t:%Y%m%d%H%M}_0000000{i:09d}"
+        inner[name + ".zip"] = zip_of({name + ".CSV": csv_builder(t, 1).encode()})
+    return zip_of(inner)
+
+
+@pytest.fixture
+def store():
+    s = Store(":memory:")
+    yield s
+    s.close()
