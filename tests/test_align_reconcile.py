@@ -74,6 +74,30 @@ def test_scada_vs_dispatch_uses_only_sa_generators():
     assert not out["flag"].any()
 
 
+def test_scada_vs_dispatch_counts_battery_output_but_not_charging_or_non_scheduled():
+    rs = _rs([1500.0] * 3)  # 1300 MW dispatched generation in each interval
+    reg = pd.DataFrame(
+        {
+            "DUID": ["GEN", "BATT", "SMALL"],
+            "REGIONID": ["SA1"] * 3,
+            "DISPATCHTYPE": ["GENERATOR", "BIDIRECTIONAL", "GENERATOR"],
+            "SCHEDULE_TYPE": ["SCHEDULED", "SCHEDULED", "NON-SCHEDULED"],
+        }
+    )
+    t = list(rs["SETTLEMENTDATE"])
+    scada = pd.DataFrame(
+        {
+            "SETTLEMENTDATE": t * 3,
+            "DUID": ["GEN"] * 3 + ["BATT"] * 3 + ["SMALL"] * 3,
+            # the battery discharges 200 MW, then idles, then charges 100 MW
+            "SCADAVALUE": [1100.0, 1300.0, 1300.0, 200.0, 0.0, -100.0] + [40.0] * 3,
+        }
+    )
+    out = scada_vs_dispatch(rs, scada, reg)
+    assert out["scada_generation"].tolist() == [1300.0, 1300.0, 1300.0]
+    assert not out["flag"].any()
+
+
 def test_scada_missing_interval_is_flagged():
     rs = _rs([1500.0] * 3)
     reg = pd.DataFrame({"DUID": ["A"], "REGIONID": ["SA1"], "DISPATCHTYPE": ["GENERATOR"]})

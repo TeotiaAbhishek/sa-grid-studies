@@ -241,7 +241,7 @@ def _figure(recon: pd.DataFrame, cps: list[int]):
         ax.axvline(recon["SETTLEMENTDATE"].iloc[k], color="#c0392b", lw=1, ls="--")
     ax.axhline(0, color="#888", lw=0.5)
     ax.set_ylabel("SCADA minus dispatch (MW)")
-    ax.set_title("SA generator SCADA total vs dispatched generation, with detected shifts")
+    ax.set_title("SA SCADA generation total vs dispatched generation, with detected shifts")
     return fig
 
 
@@ -363,7 +363,9 @@ def _markdown(nb, issues, summary, seg_df) -> str:
         "- **Missing:** intervals with no reading from a unit that reported at other times.",
         "- **Change points** in the gap between the SA SCADA total and dispatched generation, "
         "found by binary segmentation with a BIC-style penalty. A step in that gap points to a "
-        "unit whose telemetry changed.",
+        "unit whose telemetry changed. The SCADA total covers scheduled and semi-scheduled "
+        "generators plus battery output (not charging), which is what dispatched generation "
+        "counts.",
         "",
         "## Findings",
         f"- {nb['issues']} issues across {nb['units_with_issues']} of {nb['sa_units_reporting']} "

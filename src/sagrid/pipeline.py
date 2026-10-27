@@ -72,6 +72,7 @@ def load_texts(
 
     rows: dict[str, int] = {}
     rejects: dict[str, int] = {}
+    store.clear_rejects("_malformed", source)
     if malformed:
         bad = pd.DataFrame(malformed, columns=["member", "line", "REASON"])
         rejects["_malformed"] = store.add_rejects(run_id, "_malformed", source, bad)
@@ -84,6 +85,7 @@ def load_texts(
         typed = typed.drop_duplicates()  # identical repeats are harmless; conflicts are not
         good, bad_checks = validate(typed, ds)
         rows[ds.name] = store.upsert(ds, good)
+        store.clear_rejects(ds.name, source)
         rejects[ds.name] = store.add_rejects(
             run_id, ds.name, source, bad_types
         ) + store.add_rejects(run_id, ds.name, source, bad_checks)

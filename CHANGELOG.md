@@ -23,6 +23,9 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ### Fixed
 - Unit SCADA rejected real DUIDs containing `-`, `#` or `/` (for example OSB-AG).
+- Reloading a file left its earlier rejects in place, so `sagrid check` kept counting rows that now load. A reload now replaces that file's rejects.
+- The SCADA-vs-dispatch check left out battery output, which dispatched generation includes, and counted non-scheduled units, which it does not.
+- Tests read a real `data/registry.csv` or `sagrid.toml` from the working folder; each test now runs in its own folder with no `SAGRID_*` settings.
 
 ## [0.0.1] - 2026-10-27
 ### Added
