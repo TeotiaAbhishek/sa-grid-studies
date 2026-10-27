@@ -1,0 +1,13 @@
+data/
+*.duckdb
+*.duckdb.wal
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+.venv/
+sagrid.toml
+*.log
