@@ -12,7 +12,6 @@ A table is identified by "<REPORT>_<TABLE>" (for example DISPATCH_REGIONSUM).
 from __future__ import annotations
 
 import csv
-import io
 import logging
 from dataclasses import dataclass, field
 
@@ -30,6 +29,18 @@ class ParsedFile:
     tables: dict[str, pd.DataFrame] = field(default_factory=dict)
     bad_rows: list[tuple[int, str]] = field(default_factory=list)  # (line number, reason)
     footer_seen: bool = False
+
+
+def _lines(text: str):
+    """Yield lines one at a time without copying the text (io.StringIO holds a
+    second, wider copy of it, which is large for a day of unit targets)."""
+    start, n = 0, len(text)
+    while start < n:
+        end = text.find("\n", start)
+        if end == -1:
+            end = n
+        yield text[start:end]
+        start = end + 1
 
 
 def parse_aemo_csv(
@@ -50,7 +61,7 @@ def parse_aemo_csv(
     rows: dict[str, list[list[str]]] = {}
     result = ParsedFile()
 
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(_lines(text))
     for lineno, rec in enumerate(reader, start=1):
         if not rec:
             continue

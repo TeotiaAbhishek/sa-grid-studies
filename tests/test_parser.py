@@ -65,3 +65,10 @@ def test_keep_limits_columns_but_still_checks_row_length():
     assert list(df.columns) == ["SETTLEMENTDATE", "DUID", "TOTALCLEARED"]
     assert df["TOTALCLEARED"].tolist() == ["-59"]
     assert len(p.bad_rows) == 1  # the short row is caught against the full header
+
+
+def test_windows_line_endings_parse_the_same():
+    text = dispatchis_csv(T0, n=2)
+    a, b = parse_aemo_csv(text), parse_aemo_csv(text.replace("\n", "\r\n"))
+    assert all(a.tables[k].equals(b.tables[k]) for k in a.tables)
+    assert b.footer_seen and not b.bad_rows

@@ -404,6 +404,14 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
     # SOLH, a semi-scheduled solar farm, dips 40 MW below its forecast for one interval.
     sol_h = np.full(len(t), 80.0)
     sol_h[600] = 40.0
+    # BATTK is told to charge at -100 MW for 30 minutes but swings between -10 and -40.
+    batt_k = np.zeros(len(t))
+    batt_k[900:906] = [-10.0, -40.0, -10.0, -40.0, -10.0, -40.0]
+    batt_k_target = np.zeros(len(t))
+    batt_k_target[900:906] = -100.0
+    # BATTM, not offered to the market, reads 119 MW for one sample.
+    batt_m = np.zeros(len(t))
+    batt_m[700] = 119.0
     extra = pd.concat(
         [
             pd.DataFrame({"SETTLEMENTDATE": t, "DUID": d, "SCADAVALUE": v})
@@ -413,6 +421,8 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
                 ("GASG", tripped),
                 ("GASH", gas_h),
                 ("SOLH", sol_h),
+                ("BATTK", batt_k),
+                ("BATTM", batt_m),
             )
         ]
     )
@@ -423,6 +433,8 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
         "GASG": np.full(len(t), 100.0),
         "GASH": np.full(len(t), 70.0),
         "SOLH": np.full(len(t), 80.0),
+        "BATTK": batt_k_target,
+        "BATTM": np.zeros(len(t)),
     }
     sol = pd.concat(
         [
@@ -433,7 +445,7 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
                     "INTERVENTION": 0,
                     "INITIALMW": np.nan,
                     "TOTALCLEARED": v,
-                    "AVAILABILITY": np.nan,
+                    "AVAILABILITY": 0.0 if d == "BATTM" else np.nan,
                     "SEMIDISPATCHCAP": 0.0,
                     "UIGF": np.nan,
                 }
@@ -447,13 +459,13 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
             REGISTRY,
             pd.DataFrame(
                 {
-                    "DUID": ["BATTE", "GASF", "GASG", "GASH", "SOLH"],
+                    "DUID": ["BATTE", "GASF", "GASG", "GASH", "SOLH", "BATTK", "BATTM"],
                     "REGIONID": "SA1",
-                    "STATION": ["Battery E", "Gas F", "Gas G", "Gas H", "Solar H"],
-                    "DISPATCHTYPE": ["BIDIRECTIONAL"] + ["GENERATOR"] * 4,
-                    "SCHEDULE_TYPE": ["SCHEDULED"] * 4 + ["SEMI-SCHEDULED"],
-                    "FUEL": ["Battery", "Gas", "Gas", "Gas", "Solar"],
-                    "REG_CAP_MW": [60.0, 50.0, 120.0, 150.0, 100.0],
+                    "STATION": ["E", "F", "G", "H", "Solar H", "K", "M"],
+                    "DISPATCHTYPE": ["BIDIRECTIONAL"] + ["GENERATOR"] * 4 + ["BIDIRECTIONAL"] * 2,
+                    "SCHEDULE_TYPE": ["SCHEDULED"] * 4 + ["SEMI-SCHEDULED"] + ["SCHEDULED"] * 2,
+                    "FUEL": ["Battery", "Gas", "Gas", "Gas", "Solar", "Battery", "Battery"],
+                    "REG_CAP_MW": [60.0, 50.0, 120.0, 150.0, 100.0, 200.0, 150.0],
                 }
             ),
         ]
@@ -468,6 +480,11 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
     assert set(gas_h["ISSUE"]) <= {"spike"} and len(gas_h) <= 2  # never the on-target reading
     assert t.iloc[301] not in set(gas_h["FIRST"])
     assert set(reg.loc[reg["DUID"] == "SOLH", "ISSUE"]) == {"brief_departure"}
+    k = reg[reg["DUID"] == "BATTK"]  # one conformance episode, not alternating spikes
+    assert k["ISSUE"].tolist() == ["off_target"] and k["INTERVALS"].iloc[0] == 6
+    assert "below target" not in k["EVIDENCE"].iloc[0]  # charging less than asked is above target
+    m = reg[reg["DUID"] == "BATTM"]
+    assert m["ISSUE"].tolist() == ["spike"] and "not offered" in m["EVIDENCE"].iloc[0]
     assert ("GASF", "stuck") not in found  # constant target: a setpoint, not frozen telemetry
     assert rep.numbers["targets_used"] and rep.numbers["stuck_at_setpoint"] >= 1
     stuck = reg[(reg["DUID"] == "WINDA") & (reg["ISSUE"] == "stuck")]["EVIDENCE"].iloc[0]

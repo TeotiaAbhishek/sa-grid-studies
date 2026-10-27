@@ -35,6 +35,7 @@ NEGATIVE_FLOOR_MW = 5.0
 SETPOINT_TOL_MW = 2.0  # a stuck run whose target also held within this is a unit at setpoint
 NO_RESPONSE_MIN_INTERVALS = 3
 NO_RESPONSE_MIN_TARGET_MW = 5.0
+OFF_TARGET_MIN_INTERVALS = 3  # 15 minutes
 
 RESPONSES = {
     "stuck": "Possible frozen telemetry. Exclude the period from analysis and raise it with the "
@@ -47,6 +48,9 @@ RESPONSES = {
     "registry (storage or load) before treating it as a fault.",
     "missing": "Unit stopped reporting for part of the window. Check for decommissioning, a "
     "registry change or a dropped feed.",
+    "off_target": "A scheduled unit stayed well away from its dispatch target. Usually a real "
+    "limit (a battery near full or empty, a unit unable to ramp), so it is a conformance "
+    "question for the participant rather than a telemetry fault.",
     "brief_departure": "A semi-scheduled unit left its forecast-based target for one interval "
     "and came back. Usually weather (a passing cloud or a gust); treat as a telemetry glitch "
     "only if it recurs at the same size or direction.",
@@ -62,6 +66,7 @@ SEVERITY = {
     "negative": "low",
     "no_response": "high",
     "brief_departure": "low",
+    "off_target": "medium",
 }
 
 
@@ -165,7 +170,7 @@ def screen_units(
     types = units.set_index("DUID")["DISPATCHTYPE"]
     schedule = units.set_index("DUID")["SCHEDULE_TYPE"] if "SCHEDULE_TYPE" in units else pd.Series()
     by_unit = (
-        {d: g.set_index("SETTLEMENTDATE")["TOTALCLEARED"] for d, g in targets.groupby("DUID")}
+        {d: g.set_index("SETTLEMENTDATE") for d, g in targets.groupby("DUID")}
         if targets is not None
         else {}
     )
@@ -176,7 +181,8 @@ def screen_units(
         s = full[full.index.isin(grid)]
         cap = caps.get(duid)
         cap = float(cap) if cap is not None and pd.notna(cap) else None
-        tgt = by_unit[duid].reindex(grid) if duid in by_unit else None
+        unit_targets = by_unit[duid].reindex(grid) if duid in by_unit else None
+        tgt = unit_targets["TOTALCLEARED"] if unit_targets is not None else None
         if tgt is not None and tgt.notna().mean() < 0.5:
             tgt = None  # too few targets to judge against
         end = full.reindex(grid + SCADA_LAG).to_numpy()  # output at the end of each interval
@@ -216,11 +222,49 @@ def screen_units(
 
         if tgt is not None:
             gap = pd.Series(end - tgt.to_numpy(), index=grid + SCADA_LAG).dropna()
+            semi = schedule.get(duid) == "SEMI-SCHEDULED"
+            gap = pd.Series(end - tgt.to_numpy(), index=grid + SCADA_LAG)
+            limit = max(SPIKE_MIN_MW, 0.1 * cap) if cap else SPIKE_MIN_MW
+
+            # Several intervals well off target on the same side: one conformance episode,
+            # not a series of spikes. Semi-scheduled targets are forecasts, so not tested.
+            in_episode = pd.Series(False, index=gap.index)
+            if not semi:
+                for sign in (1, -1):
+                    away = (sign * gap > limit).fillna(False)
+                    for _, r in runs(away).iterrows():
+                        if int(r["length"]) < OFF_TARGET_MIN_INTERVALS:
+                            continue
+                        span = gap.index[int(r["start"]) : int(r["start"]) + int(r["length"])]
+                        in_episode[span] = True
+                        target = tgt[span - SCADA_LAG].mean()
+                        issues.append(
+                            _issue(
+                                duid,
+                                "off_target",
+                                span[0],
+                                span[-1],
+                                len(span),
+                                f"{'above' if sign > 0 else 'below'} target by "
+                                f"{abs(gap[span]).mean():.1f} MW on average for "
+                                f"{5 * len(span)} minutes (target {target:.1f} MW)",
+                            )
+                        )
+
             # A semi-scheduled target is a forecast, so one interval away from it is
             # usually weather (a passing cloud or a gust), not telemetry.
-            kind = "brief_departure" if schedule.get(duid) == "SEMI-SCHEDULED" else "spike"
-            for t in gap[find_spikes(gap, cap, baseline=0.0)].index:
-                before, after = gap.shift(1).get(t, np.nan), gap.shift(-1).get(t, np.nan)
+            kind = "brief_departure" if semi else "spike"
+            g = gap.dropna()
+            for t in g[find_spikes(g, cap, baseline=0.0)].index:
+                if in_episode.get(t, False):
+                    continue
+                before, after = g.shift(1).get(t, np.nan), g.shift(-1).get(t, np.nan)
+                avail = (
+                    unit_targets["AVAILABILITY"].get(t - SCADA_LAG, np.nan)
+                    if unit_targets is not None
+                    else np.nan
+                )
+                note = " (unit not offered: availability 0)" if avail == 0 else ""
                 issues.append(
                     _issue(
                         duid,
@@ -229,8 +273,8 @@ def screen_units(
                         t,
                         1,
                         f"{full[t]:.1f} MW against a target of {tgt[t - SCADA_LAG]:.1f} MW; "
-                        f"off target by {gap[t]:.1f} MW against {before:.1f} and {after:.1f} "
-                        "either side",
+                        f"off target by {g[t]:.1f} MW against {before:.1f} and {after:.1f} "
+                        f"either side{note}",
                     )
                 )
 
@@ -421,6 +465,7 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
             "setpoint_tol_mw": SETPOINT_TOL_MW,
             "no_response_min_minutes": 5 * NO_RESPONSE_MIN_INTERVALS,
             "no_response_min_target_mw": NO_RESPONSE_MIN_TARGET_MW,
+            "off_target_min_minutes": 5 * OFF_TARGET_MIN_INTERVALS,
         },
     }
     tables = {"issues_register": issues, "issue_summary": summary, "residual_segments": seg_df}
@@ -489,9 +534,13 @@ def _markdown(nb, issues, summary, seg_df) -> str:
         "- **Missing:** intervals with no reading from a unit that reported at other times.",
         *(
             [
+                f"- **Off target:** a scheduled unit at least {th['spike_min_mw']:g} MW (or 10% "
+                f"of capacity) away from its target, on the same side, for at least "
+                f"{th['off_target_min_minutes']} minutes. Usually a real limit (a battery near "
+                "full or empty), so it is reported as one conformance episode, not as spikes.",
                 f"- **No response:** a reading of zero for at least "
                 f"{th['no_response_min_minutes']} minutes while the target was at least "
-                f"{th['no_response_min_target_mw']:g} MW (or 5% of capacity)."
+                f"{th['no_response_min_target_mw']:g} MW (or 5% of capacity).",
             ]
             if nb["targets_used"]
             else []
