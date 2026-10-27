@@ -36,8 +36,17 @@ PENALTY_MV = 1e5
 
 # AEMO constraint IDs start with the region or system they act on.
 # S = South Australia; V::S, V^^S, V>>S, V_S and S>>V cover the Victoria-SA
-# connection. F = frequency control (FCAS) and N/Q/T/V = other regions.
-SA_PATTERN = re.compile(r"^(S|V::S|V\^\^S|V>>S|V_S|S>>V)|_SA_|HEYWOOD|MURRAY", re.IGNORECASE)
+# connection, and PEC is Project EnergyConnect (SA-NSW). F = frequency
+# control (FCAS) and N/Q/T/V = other regions.
+SA_PATTERN = re.compile(
+    r"^(S|V::S|V\^\^S|V>>S|V_S|S>>V)|_SA_|_SA$|HEYWOOD|MURRAY|PEC", re.IGNORECASE
+)
+
+# A comparison group smaller than this is too thin to report a price difference on.
+MIN_COMPARISON = 30
+# Odds ratios beyond this mean the input almost separates binding from not
+# binding; the direction is meaningful but the size is not.
+SEPARATION_OR = 100.0
 
 TABLES = ("region_summary", "price", "interconnector", "constraint", "rooftop_pv")
 
@@ -101,7 +110,9 @@ def rank_constraints(con: pd.DataFrame, frame: pd.DataFrame, n_intervals: int) -
             diff, _ = hour_adjusted_difference(
                 rrp, pd.Series(flag, index=rrp.index), hour.reindex(rrp.index)
             )
-            row["RRP_DIFF_SAME_HOUR"] = diff
+            # With almost no intervals on one side the comparison means little.
+            thin = min(int(flag.sum()), int((~flag).sum())) < MIN_COMPARISON
+            row["RRP_DIFF_SAME_HOUR"] = np.nan if thin else diff
         rows.append(row)
     out = pd.DataFrame(rows)
     if out.empty:
@@ -193,8 +204,14 @@ def drivers(
             "AUC_DROP_WHEN_SHUFFLED": np.mean(imps, axis=0) if imps else np.nan,
         }
     ).sort_values("AUC_DROP_WHEN_SHUFFLED", ascending=False)
+    separated = odds.loc[
+        (odds["ODDS_RATIO_PER_SD"] > SEPARATION_OR)
+        | (odds["ODDS_RATIO_PER_SD"] < 1 / SEPARATION_OR),
+        "INPUT",
+    ].tolist()
     return {
         "constraint": cid,
+        "separated_inputs": separated,
         "binding_share": float(y.mean()),
         "intervals_modelled": int(len(y)),
         "odds": odds,
@@ -256,6 +273,9 @@ def run(store: Store, w: Window, top_models: int = 3) -> Report:
         ],
         "has_price": "RRP" in frame,
         "has_rooftop": "ROOFTOP_PV" in frame and frame["ROOFTOP_PV"].notna().any(),
+        "rooftop_missing_intervals": int(frame["ROOFTOP_PV"].isna().sum())
+        if "ROOFTOP_PV" in frame
+        else n,
     }
 
     tables = {"ranked_constraints": ranked}
@@ -316,7 +336,16 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
         f"{n:,} five-minute dispatch intervals. {numbers['constraints_in_data']:,} constraints "
         f"appear in the data and {numbers['constraints_binding']:,} bound at least once (non-zero "
         "marginal value). Price is SA's regional reference price (RRP)."
-        + ("" if numbers["has_rooftop"] else " Rooftop PV was not loaded for this window."),
+        + (
+            " Rooftop PV was not loaded for this window."
+            if not numbers["has_rooftop"]
+            else (
+                f" Rooftop PV is missing for {numbers['rooftop_missing_intervals']} intervals "
+                "(half hours AEMO did not publish); models use intervals with every input."
+                if numbers["rooftop_missing_intervals"]
+                else ""
+            )
+        ),
         "",
         "## Method",
         "1. Count binding intervals per constraint, with a 95% Wilson interval on the share.",
@@ -326,7 +355,8 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
         f"{PENALTY_MV:,.0f} or more). These signal a violated constraint, not a market price.",
         "4. Compare SA price when a constraint binds against the same hours of day when it does "
         "not. This stops the evening peak or the midday solar trough from looking like a "
-        "constraint effect.",
+        f"constraint effect. The difference is left blank when either side has fewer than "
+        f"{MIN_COMPARISON} intervals.",
         "5. For the most frequent SA constraints that bind in 5% to 95% of intervals, fit a "
         "logistic regression (odds ratios per standard deviation, with a bootstrap over days) "
         "and a gradient boosting model checked by holding out whole days.",
@@ -348,6 +378,37 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
         ]
     if sa.empty:
         parts += ["No SA network constraint bound in this window.", ""]
+    else:
+        sa_show = sa.head(10)[
+            [
+                c
+                for c in [
+                    "CONSTRAINTID",
+                    "BINDING_INTERVALS",
+                    "SHARE",
+                    "RRP_BINDING",
+                    "RRP_DIFF_SAME_HOUR",
+                ]
+                if c in sa
+            ]
+        ].copy()
+        sa_show["SHARE"] = sa_show["SHARE"].map(lambda v: pct(v))
+        sa_show = sa_show.rename(
+            columns={
+                "CONSTRAINTID": "Constraint",
+                "BINDING_INTERVALS": "Intervals binding",
+                "SHARE": "Share",
+                "RRP_BINDING": "Mean SA price when binding ($/MWh)",
+                "RRP_DIFF_SAME_HOUR": "Price difference vs same hours not binding ($/MWh)",
+            }
+        )
+        parts += [
+            "### SA network constraints",
+            f"{len(sa)} SA network constraints bound at least once. The most frequent:",
+            "",
+            md_table(sa_show),
+            "",
+        ]
     for m in models:
         odds = m["odds"].copy()
         odds = odds.rename(
@@ -367,6 +428,16 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
             "",
             md_table(odds),
             "",
+            *(
+                [
+                    f"Note: {', '.join(m['separated_inputs'])} almost separates binding from "
+                    "non-binding intervals on its own, so its odds ratio is unstable. Read it as "
+                    "a very strong association in the direction shown, not as a size.",
+                    "",
+                ]
+                if m["separated_inputs"]
+                else []
+            ),
             f"Shuffling **{top_imp['INPUT']}** costs the most accuracy on held-out days "
             f"(AUC drop {fmt(top_imp['AUC_DROP_WHEN_SHUFFLED'], 3)}). An odds ratio above 1 means "
             "the constraint is more likely to bind when that input is higher; an interval that "

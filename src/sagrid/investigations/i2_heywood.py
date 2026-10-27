@@ -74,8 +74,8 @@ def condition_tests(frame: pd.DataFrame, flag: pd.Series) -> pd.DataFrame:
 
     rows = []
     for col, label in CONDITIONS.items():
-        if col not in frame or frame[col].isna().all():
-            continue
+        if col not in frame or frame[col].nunique(dropna=True) <= 1:
+            continue  # missing or constant: nothing to compare
         on, off = frame.loc[flag, col].dropna(), frame.loc[~flag, col].dropna()
         if len(on) < 5 or len(off) < 5:
             continue

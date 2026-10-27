@@ -339,3 +339,25 @@ def test_cli_investigate(tmp_path, monkeypatch, capsys):
     args[1] = "i3"  # no registry configured
     assert main(args) == 3
     assert "registry" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "cid,expected",
+    [
+        ("S>NIL_MHNW1_MHNW2", "SA network"),
+        ("V_S_6CGH_SA_UFLS", "SA network"),
+        ("L_PEC_X_6C_6G_6H", "SA network"),
+        ("V::S_NIL_MAXG_AUTO", "SA network"),
+        ("F_T+RREG_0050", "Frequency control (FCAS)"),
+        ("Q>NIL_CPWU_CLWU_RAD", "Other region or system"),
+        ("N>>N-NIL_TX", "Other region or system"),
+    ],
+)
+def test_constraint_categories(cid, expected):
+    assert i1_constraints.category(cid) == expected
+
+
+def test_i1_leaves_thin_price_comparisons_blank(week):
+    nb = i1_constraints.run(week, W).numbers
+    always = next(r for r in nb["top"] if r["CONSTRAINTID"] == "F_TEST")
+    assert np.isnan(always["RRP_DIFF_SAME_HOUR"])  # binds in every interval
