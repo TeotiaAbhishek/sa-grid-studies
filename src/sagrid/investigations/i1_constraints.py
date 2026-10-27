@@ -39,7 +39,7 @@ PENALTY_MV = 1e5
 # connection, and PEC is Project EnergyConnect (SA-NSW). F = frequency
 # control (FCAS) and N/Q/T/V = other regions.
 SA_PATTERN = re.compile(
-    r"^(S|V::S|V\^\^S|V>>S|V_S|S>>V)|_SA_|_SA$|HEYWOOD|MURRAY|PEC", re.IGNORECASE
+    r"^(S|V::S|V\^\^S|V>>S|V_S_|S>>V)|_SA_|_SA$|HEYWOOD|MURRAY|PEC", re.IGNORECASE
 )
 
 # A comparison group smaller than this is too thin to report a price difference on.
@@ -47,6 +47,10 @@ MIN_COMPARISON = 30
 # Odds ratios beyond this mean the input almost separates binding from not
 # binding; the direction is meaningful but the size is not.
 SEPARATION_OR = 100.0
+# Below this held-out-day AUC, or with fewer usable folds, a driver model
+# explains too little to act on.
+USEFUL_AUC = 0.75
+MIN_FOLDS = 3
 
 TABLES = ("region_summary", "price", "interconnector", "constraint", "rooftop_pv")
 
@@ -211,14 +215,16 @@ def drivers(
         | (odds["ODDS_RATIO_PER_SD"] < 1 / SEPARATION_OR),
         "INPUT",
     ].tolist()
+    auc = float(np.mean(aucs)) if aucs else float("nan")
     return {
         "constraint": cid,
+        "useful": len(aucs) >= MIN_FOLDS and auc >= USEFUL_AUC,
         "separated_inputs": separated,
         "binding_share": float(y.mean()),
         "intervals_modelled": int(len(y)),
         "odds": odds,
         "importance": importance.reset_index(drop=True),
-        "cv_auc_mean": float(np.mean(aucs)) if aucs else float("nan"),
+        "cv_auc_mean": auc,
         "cv_folds": len(aucs),
         "inputs": list(x.columns),
     }
@@ -432,6 +438,18 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
             "",
             *(
                 [
+                    "This model does little better than chance on days it did not see "
+                    f"(fewer than {MIN_FOLDS} usable folds or AUC below {USEFUL_AUC}), so the "
+                    "odds ratios below are not a reliable explanation. The constraint is likely "
+                    "driven by something outside these inputs, such as conditions in another "
+                    "region or a network outage.",
+                    "",
+                ]
+                if not m["useful"]
+                else []
+            ),
+            *(
+                [
                     f"Note: {', '.join(m['separated_inputs'])} almost separates binding from "
                     "non-binding intervals on its own, so its odds ratio is unstable. Read it as "
                     "a very strong association in the direction shown, not as a size.",
@@ -458,15 +476,26 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
         "",
         "## Recommended response",
     ]
-    if models:
-        best = max(models, key=lambda m: m["binding_share"])
+    if len(sa):
+        top_sa = sa.iloc[0]["CONSTRAINTID"]
         parts.append(
-            f"- Monitor `{best['constraint']}`: report its daily binding share with the pipeline's "
-            "health checks, and alert when it rises well above this baseline."
+            f"- Monitor `{top_sa}`, the most frequent SA constraint: report its daily binding "
+            "share with the pipeline's health checks, and alert when it rises well above this "
+            "baseline."
         )
+    explained = [m for m in models if m["useful"]]
+    if explained:
+        best = max(explained, key=lambda m: m["cv_auc_mean"])
         parts.append(
-            f"- Stage 2 study: run the N-1 study at the operating points where "
-            f"`{best['constraint']}` binds, to see which element limits transfer."
+            f"- Stage 2 study: `{best['constraint']}` is the best-explained SA constraint "
+            f"(held-out AUC {fmt(best['cv_auc_mean'], 2)}). Run the N-1 study at the operating "
+            "points where it binds, to see which element limits transfer."
+        )
+    unexplained = [m["constraint"] for m in models if not m["useful"]]
+    if unexplained:
+        parts.append(
+            f"- Investigate {', '.join(f'`{c}`' for c in unexplained)} with outage and "
+            "neighbouring-region data, since SA conditions alone don't explain when they bind."
         )
     if len(penalty):
         parts.append(
