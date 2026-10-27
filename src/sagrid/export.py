@@ -41,7 +41,7 @@ def date_dimension(timestamps: pd.Series) -> pd.DataFrame:
     d["MONTH"] = d["DATE"].dt.month
     d["MONTH_NAME"] = d["DATE"].dt.strftime("%b")
     d["WEEKDAY"] = d["DATE"].dt.strftime("%a")
-    d["IS_WEEKEND"] = d["DATE"].dt.dayofweek >= 5
+    d["IS_WEEKEND"] = d["DATE"].dt.day_of_week >= 5
     d["SEASON"] = d["MONTH"].map(
         {
             12: "Summer",

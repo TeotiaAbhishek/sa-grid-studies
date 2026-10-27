@@ -54,8 +54,7 @@ def scada_vs_dispatch(
         (registry["REGIONID"] == "SA1") & (registry["DISPATCHTYPE"] == "GENERATOR"), "DUID"
     ]
     s = scada[scada["DUID"].isin(sa_gens)]
-    total = s.groupby("SETTLEMENTDATE", as_index=False)["SCADAVALUE"].sum()
-    total = total.rename(columns={"SCADAVALUE": "scada_generation"})
+    total = s.groupby("SETTLEMENTDATE")["SCADAVALUE"].sum().rename("scada_generation").reset_index()
     df = regionsum[["SETTLEMENTDATE", "DISPATCHABLEGENERATION"]].merge(
         total, on="SETTLEMENTDATE", how="left"
     )

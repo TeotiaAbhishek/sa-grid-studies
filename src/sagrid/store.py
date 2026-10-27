@@ -105,9 +105,16 @@ class Store:
             [run_id, started_at, json.dumps(manifest, default=str)],
         )
 
+    def scalar(self, sql: str, params: list | None = None):
+        """Run a query that returns exactly one value."""
+        row = self.con.execute(sql, params or []).fetchone()
+        if row is None:
+            raise RuntimeError(f"query returned no rows: {sql}")
+        return row[0]
+
     def count(self, name: str) -> int:
         sql = f'SELECT count(*) FROM "{ident(name)}"'  # noqa: S608 - checked identifier
-        return int(self.con.execute(sql).fetchone()[0])
+        return int(self.scalar(sql))
 
     def table(self, name: str) -> pd.DataFrame:
         sql = f'SELECT * FROM "{ident(name)}" ORDER BY ALL'  # noqa: S608 - checked identifier
@@ -116,7 +123,7 @@ class Store:
     def table_hash(self, name: str) -> str:
         """Order-independent content hash, used to prove re-runs change nothing."""
         sql = f'SELECT bit_xor(hash(t)) FROM "{ident(name)}" t'  # noqa: S608 - checked identifier
-        return str(self.con.execute(sql).fetchone()[0])
+        return str(self.scalar(sql))
 
     def close(self) -> None:
         self.con.close()

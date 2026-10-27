@@ -171,6 +171,7 @@ def select_and_type(raw: pd.DataFrame, ds: Dataset) -> tuple[pd.DataFrame, pd.Da
     for col, kind in ds.columns.items():
         s = df[col].str.strip()
         blank = s.isna() | (s == "")
+        v: pd.Series
         if kind == "datetime":
             v = pd.to_datetime(s, format=NEM_TIME_FORMAT, errors="coerce").astype("datetime64[ns]")
         elif kind in {"float", "int"}:

@@ -32,8 +32,9 @@ def find_gaps(timestamps: pd.Series, start: date, end: date) -> pd.DataFrame:
     missing = expected.difference(present)
     if missing.empty:
         return pd.DataFrame(columns=["gap_start", "gap_end", "n_intervals"])
-    run_id = (pd.Series(missing).diff() != INTERVAL).cumsum()
-    runs = pd.Series(missing).groupby(run_id.values)
+    gaps = pd.Series(missing)
+    run_id = (gaps.diff() != INTERVAL).cumsum()
+    runs = gaps.groupby(run_id)
     return pd.DataFrame(
         {
             "gap_start": runs.min().values,
