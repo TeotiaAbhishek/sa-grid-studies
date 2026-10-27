@@ -62,6 +62,20 @@ class Store:
         self.con.execute(
             f'CREATE TABLE IF NOT EXISTS "{ident(ds.name)}" ({cols}, PRIMARY KEY ({key}))'
         )
+        # A table created by an older release may lack columns added since; add
+        # them (empty) so loads keep working. Backfill fills them for past days.
+        have = {
+            r[0]
+            for r in self.con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+                [ds.name],
+            ).fetchall()
+        }
+        for c, t in ds.columns.items():
+            if c not in have:
+                if not re.fullmatch(r"[A-Z0-9_]{1,64}", c):
+                    raise ValueError(f"invalid column name: {c!r}")
+                self.con.execute(f'ALTER TABLE "{ident(ds.name)}" ADD COLUMN "{c}" {SQL_TYPES[t]}')
 
     def upsert(self, ds: Dataset, df: pd.DataFrame) -> int:
         """Insert rows, replacing any existing row with the same key. Returns rows written."""

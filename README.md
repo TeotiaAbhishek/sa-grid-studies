@@ -12,7 +12,7 @@ Built to production standards: tested on Windows and Linux in CI, validated row 
 
 | Dataset | Source table | What it holds |
 | --- | --- | --- |
-| `region_summary` | DISPATCH_REGIONSUM | SA demand, generation, net interchange (5-minute) |
+| `region_summary` | DISPATCH_REGIONSUM | SA demand, generation, net interchange, wind and solar farm output and forecasts, battery charge and discharge (5-minute) |
 | `price` | DISPATCH_PRICE | SA spot price (RRP), price flags and regulation FCAS prices (5-minute) |
 | `interconnector` | DISPATCH_INTERCONNECTORRES | Heywood (V-SA) and Murraylink (V-S-MNSP1) flows and limits |
 | `constraint` | DISPATCH_CONSTRAINT | Network constraints, their marginal values and violations |
@@ -53,6 +53,7 @@ On macOS or Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
 | `sagrid backfill --start D --end D` | Reload a range even if files are unchanged, e.g. after an AEMO correction |
 | `sagrid check --start D --end D [--json]` | Freshness, completeness, reject rate and reconciliation checks |
 | `sagrid export` | Write the Power BI star schema (Parquet and CSV) |
+| `sagrid investigate {i1,i2,i3,all} --start D --end D` | Run investigations I1 to I3 and write reports to `docs/investigations` ([details](docs/investigations/README.md)) |
 | `sagrid status` | Show the last run's totals |
 
 Dates are `YYYY-MM-DD` or `yesterday`. Exit codes: 0 ok, 1 checks failed, 2 a file failed, 3 bad input or config.

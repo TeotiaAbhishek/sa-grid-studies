@@ -28,6 +28,9 @@ class Dataset:
     key: tuple[str, ...]
     schema: pa.DataFrameSchema
     row_filter: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Columns AEMO added in later file versions. When absent they are loaded as
+    # empty rather than failing the file, so older archives still load.
+    optional: tuple[str, ...] = ()
     time_col: str = "SETTLEMENTDATE"
     time_marks: str = "end"  # whether time_col marks the end or the start of the interval
 
@@ -55,7 +58,21 @@ REGIONSUM = Dataset(
         "DISPATCHABLELOAD": "float",
         "NETINTERCHANGE": "float",
         "TOTALINTERMITTENTGENERATION": "float",
+        "SS_WIND_CLEAREDMW": "float",
+        "SS_SOLAR_CLEAREDMW": "float",
+        "SS_WIND_UIGF": "float",
+        "SS_SOLAR_UIGF": "float",
+        "BDU_CLEAREDMW_GEN": "float",
+        "BDU_CLEAREDMW_LOAD": "float",
     },
+    optional=(
+        "SS_WIND_CLEAREDMW",
+        "SS_SOLAR_CLEAREDMW",
+        "SS_WIND_UIGF",
+        "SS_SOLAR_UIGF",
+        "BDU_CLEAREDMW_GEN",
+        "BDU_CLEAREDMW_LOAD",
+    ),
     key=("SETTLEMENTDATE", "REGIONID"),
     row_filter={"REGIONID": (SA_REGION,), "INTERVENTION": ("0",)},
     schema=pa.DataFrameSchema(
@@ -69,6 +86,15 @@ REGIONSUM = Dataset(
             "DISPATCHABLELOAD": _num(0, 3000),
             "NETINTERCHANGE": _num(-2000, 2000),
             "TOTALINTERMITTENTGENERATION": _num(-100, 6000, nullable=True),
+            # Semi-scheduled (wind and solar farm) dispatch targets and their
+            # unconstrained forecasts (UIGF); UIGF minus cleared is curtailment.
+            "SS_WIND_CLEAREDMW": _num(-100, 6000, nullable=True),
+            "SS_SOLAR_CLEAREDMW": _num(-100, 6000, nullable=True),
+            "SS_WIND_UIGF": _num(-100, 6000, nullable=True),
+            "SS_SOLAR_UIGF": _num(-100, 6000, nullable=True),
+            # Bidirectional units (grid batteries), charging and discharging.
+            "BDU_CLEAREDMW_GEN": _num(0, 3000, nullable=True),
+            "BDU_CLEAREDMW_LOAD": _num(0, 3000, nullable=True),
         },
         unique=["SETTLEMENTDATE", "REGIONID"],
     ),
@@ -229,11 +255,14 @@ def select_and_type(raw: pd.DataFrame, ds: Dataset) -> tuple[pd.DataFrame, pd.Da
     Returns (typed, rejects). A value that cannot be parsed becomes a reject
     with the column named in the reason, instead of a silent NaN.
     """
-    missing = [c for c in ds.columns if c not in raw.columns]
+    missing = [c for c in ds.columns if c not in raw.columns and c not in ds.optional]
     if missing:
         raise KeyError(f"{ds.source_table} is missing required columns: {missing}")
 
-    df = raw[list(ds.columns)].copy()
+    df = raw.reindex(columns=list(ds.columns)).copy()
+    for col in ds.optional:
+        if col not in raw.columns:
+            df[col] = ""  # blank, so it types to an empty value like any blank field
     for col, allowed in ds.row_filter.items():
         df = df[df[col].str.strip().isin(allowed)]
     df = df.reset_index(drop=True)

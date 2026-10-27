@@ -61,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if name == "check":
             sp.add_argument("--json", action="store_true", help="print results as JSON")
+    inv = sub.add_parser("investigate", help="run investigations I1 to I3 and write reports")
+    inv.add_argument("which", choices=["i1", "i2", "i3", "all"])
+    inv.add_argument("--start", type=_date, required=True)
+    inv.add_argument("--end", type=_date, required=True)
+    inv.add_argument("--out", type=Path, default=Path("docs/investigations"))
     sub.add_parser("export")
     sub.add_parser("status")
     return p
@@ -132,6 +137,34 @@ def main(argv: list[str] | None = None) -> int:
             paths = export_powerbi(store, s.export_dir, registry)
             print(f"wrote {len(paths)} files to {s.export_dir}")
             return EXIT_OK
+
+        if args.command == "investigate":
+            from sagrid.investigations import i1_constraints, i2_heywood, i3_scada
+            from sagrid.investigations.common import Window, write_report
+
+            w = Window(args.start, args.end)
+            which = ["i1", "i2", "i3"] if args.which == "all" else [args.which]
+            registry = None
+            if "i3" in which and s.registry_path:
+                from sagrid.registry import load_registry
+
+                registry = load_registry(s.registry_path)
+            failed = 0
+            for key in which:
+                try:
+                    if key == "i1":
+                        rep = i1_constraints.run(store, w)
+                    elif key == "i2":
+                        rep = i2_heywood.run(store, w)
+                    else:
+                        rep = i3_scada.run(store, w, registry)
+                except ValueError as exc:
+                    print(f"{key}: {exc}", file=sys.stderr)
+                    failed += 1
+                    continue
+                paths = write_report(rep, args.out)
+                print(f"{key}: wrote {paths[0]} and {len(paths) - 1} supporting files")
+            return EXIT_BAD_INPUT if failed else EXIT_OK
 
         if args.command == "status":
             row = store.con.execute(
