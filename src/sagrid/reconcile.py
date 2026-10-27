@@ -62,14 +62,9 @@ def scada_vs_dispatch(
     if "SCHEDULE_TYPE" in registry:  # the hand-downloaded workbook has no schedule type
         keep &= registry["SCHEDULE_TYPE"].isin(["SCHEDULED", "SEMI-SCHEDULED"])
     s = scada[scada["DUID"].isin(registry.loc[keep, "DUID"])]
-    total = (
-        s["SCADAVALUE"]
-        .clip(lower=0)
-        .groupby(s["SETTLEMENTDATE"])
-        .sum()
-        .rename("scada_generation")
-        .reset_index()
-    )
+    storage = s["DUID"].isin(registry.loc[registry["DISPATCHTYPE"] == "BIDIRECTIONAL", "DUID"])
+    value = s["SCADAVALUE"].where(~storage, s["SCADAVALUE"].clip(lower=0))
+    total = value.groupby(s["SETTLEMENTDATE"]).sum().rename("scada_generation").reset_index()
     df = regionsum[["SETTLEMENTDATE", "DISPATCHABLEGENERATION"]].merge(
         total, on="SETTLEMENTDATE", how="left"
     )
