@@ -12,7 +12,6 @@ A table is identified by "<REPORT>_<TABLE>" (for example DISPATCH_REGIONSUM).
 from __future__ import annotations
 
 import csv
-import io
 import logging
 from dataclasses import dataclass, field
 
@@ -32,18 +31,37 @@ class ParsedFile:
     footer_seen: bool = False
 
 
-def parse_aemo_csv(text: str, wanted: set[str] | None = None) -> ParsedFile:
+def _lines(text: str):
+    """Yield lines one at a time without copying the text (io.StringIO holds a
+    second, wider copy of it, which is large for a day of unit targets)."""
+    start, n = 0, len(text)
+    while start < n:
+        end = text.find("\n", start)
+        if end == -1:
+            end = n
+        yield text[start:end]
+        start = end + 1
+
+
+def parse_aemo_csv(
+    text: str, wanted: set[str] | None = None, keep: dict[str, set[str]] | None = None
+) -> ParsedFile:
     """Parse one AEMO CSV document into a DataFrame per table.
 
     Rows that do not match their table header are recorded in ``bad_rows``
     rather than raising, so one malformed row never loses a whole file.
     A file with no ``I`` rows at all raises ParseError.
+
+    ``keep`` limits a table to the named columns. Rows are still checked
+    against the full header; only the kept values are held in memory, which
+    matters for wide tables (UNIT_SOLUTION has 69 columns, of which we use 8).
     """
     headers: dict[str, list[str]] = {}
+    picks: dict[str, list[int] | None] = {}
     rows: dict[str, list[list[str]]] = {}
     result = ParsedFile()
 
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(_lines(text))
     for lineno, rec in enumerate(reader, start=1):
         if not rec:
             continue
@@ -62,6 +80,10 @@ def parse_aemo_csv(text: str, wanted: set[str] | None = None) -> ParsedFile:
 
         if kind == "I":
             headers[name] = [c.strip().upper() for c in rec[4:]]
+            cols_kept = (keep or {}).get(name)
+            picks[name] = (
+                [i for i, c in enumerate(headers[name]) if c in cols_kept] if cols_kept else None
+            )
             rows.setdefault(name, [])
             continue
 
@@ -75,7 +97,8 @@ def parse_aemo_csv(text: str, wanted: set[str] | None = None) -> ParsedFile:
                 (lineno, f"{name}: expected {len(cols)} fields, got {len(values)}")
             )
             continue
-        rows[name].append(values)
+        idx = picks[name]
+        rows[name].append(values if idx is None else [values[i] for i in idx])
 
     if not headers:
         raise ParseError("no table header (I) rows found")
@@ -83,5 +106,7 @@ def parse_aemo_csv(text: str, wanted: set[str] | None = None) -> ParsedFile:
         log.warning("file has no END OF REPORT footer; it may be truncated")
 
     for name, cols in headers.items():
-        result.tables[name] = pd.DataFrame(rows[name], columns=cols, dtype="string")
+        idx = picks[name]
+        kept = cols if idx is None else [cols[i] for i in idx]
+        result.tables[name] = pd.DataFrame(rows[name], columns=kept, dtype="string")
     return result

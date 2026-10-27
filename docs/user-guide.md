@@ -43,6 +43,14 @@ This builds `data/registry.csv` (one row per unit: region, dispatch type, statio
 
 AEMO's "NEM Registration and Exemption List" workbook also works: download it from aemo.com.au and set `registry_path` in `sagrid.toml`. That setting takes priority over `data/registry.csv`.
 
+## Adding dispatch targets
+
+```powershell
+sagrid ingest --start 2026-10-19 --end 2026-10-25 --datasets unit_solution
+```
+
+This loads each unit's dispatch target from AEMO's Next Day Dispatch report (about 8 MB a day, all NEM units). AEMO publishes a day's file at about 04:10 the next morning, so the most recent day is not available until then. With targets loaded, I3 judges each SCADA reading against what dispatch asked for, so a battery switching between charging and discharging or a unit held at a setpoint is no longer flagged, and a unit reading 0 MW while dispatched is.
+
 ## Querying the data directly
 
 ```python

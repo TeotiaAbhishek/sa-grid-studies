@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
                     "constraint",
                     "rooftop_pv",
                     "unit_scada",
+                    "unit_solution",
                 ],
             )
         if name == "check":

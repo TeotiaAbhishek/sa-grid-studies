@@ -380,3 +380,116 @@ def test_i1_leaves_thin_price_comparisons_blank(week):
     nb = i1_constraints.run(week, W).numbers
     always = next(r for r in nb["top"] if r["CONSTRAINTID"] == "F_TEST")
     assert np.isnan(always["RRP_DIFF_SAME_HOUR"])  # binds in every interval
+
+
+def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
+    # Targets for interval t are answered by the reading stamped t + 5 minutes.
+    scada = week.table("unit_scada")
+    t = pd.Series(sorted(scada["SETTLEMENTDATE"].unique()))
+    i = np.arange(len(t))
+    clean = {
+        "WINDA": 50 + 30 * np.sin(i / 40),  # the synthetic wind without noise or faults
+        "GASB": np.full(len(t), 150.0),
+        "GASC": np.full(len(t), 60.0),
+    }
+    # New units: a battery that swings with its targets, a gas unit held at a
+    # setpoint, and a unit that reads 0 MW for 30 minutes while dispatched.
+    batt = np.where(i % 2 == 0, -50.0, 50.0)
+    held = np.full(len(t), 40.0)
+    tripped = np.full(len(t), 100.0)
+    tripped[800:806] = 0.0
+    # GASH is 40 MW off target either side of one on-target reading: that reading is not a spike.
+    gas_h = np.full(len(t), 70.0)
+    gas_h[[300, 302]] = 110.0
+    # SOLH, a semi-scheduled solar farm, dips 40 MW below its forecast for one interval.
+    sol_h = np.full(len(t), 80.0)
+    sol_h[600] = 40.0
+    # BATTK is told to charge at -100 MW for 30 minutes but swings between -10 and -40,
+    # with one reading (-90) briefly back near target that must not split the episode.
+    batt_k = np.zeros(len(t))
+    batt_k[900:906] = [-10.0, -40.0, -90.0, -40.0, -10.0, -40.0]
+    batt_k_target = np.zeros(len(t))
+    batt_k_target[900:906] = -100.0
+    # BATTM, not offered to the market, reads 119 MW for one sample.
+    batt_m = np.zeros(len(t))
+    batt_m[700] = 119.0
+    extra = pd.concat(
+        [
+            pd.DataFrame({"SETTLEMENTDATE": t, "DUID": d, "SCADAVALUE": v})
+            for d, v in (
+                ("BATTE", batt),
+                ("GASF", held),
+                ("GASG", tripped),
+                ("GASH", gas_h),
+                ("SOLH", sol_h),
+                ("BATTK", batt_k),
+                ("BATTM", batt_m),
+            )
+        ]
+    )
+    week.upsert(DATASETS["unit_scada"], extra)
+    clean |= {
+        "BATTE": batt,
+        "GASF": held,
+        "GASG": np.full(len(t), 100.0),
+        "GASH": np.full(len(t), 70.0),
+        "SOLH": np.full(len(t), 80.0),
+        "BATTK": batt_k_target,
+        "BATTM": np.zeros(len(t)),
+    }
+    sol = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "SETTLEMENTDATE": t - pd.Timedelta(minutes=5),
+                    "DUID": d,
+                    "INTERVENTION": 0,
+                    "INITIALMW": np.nan,
+                    "TOTALCLEARED": v,
+                    "AVAILABILITY": 0.0 if d == "BATTM" else np.nan,
+                    "SEMIDISPATCHCAP": 0.0,
+                    "UIGF": np.nan,
+                }
+            )
+            for d, v in clean.items()
+        ]
+    )
+    week.upsert(DATASETS["unit_solution"], sol)
+    registry = pd.concat(
+        [
+            REGISTRY,
+            pd.DataFrame(
+                {
+                    "DUID": ["BATTE", "GASF", "GASG", "GASH", "SOLH", "BATTK", "BATTM"],
+                    "REGIONID": "SA1",
+                    "STATION": ["E", "F", "G", "H", "Solar H", "K", "M"],
+                    "DISPATCHTYPE": ["BIDIRECTIONAL"] + ["GENERATOR"] * 4 + ["BIDIRECTIONAL"] * 2,
+                    "SCHEDULE_TYPE": ["SCHEDULED"] * 4 + ["SEMI-SCHEDULED"] + ["SCHEDULED"] * 2,
+                    "FUEL": ["Battery", "Gas", "Gas", "Gas", "Solar", "Battery", "Battery"],
+                    "REG_CAP_MW": [60.0, 50.0, 120.0, 150.0, 100.0, 200.0, 150.0],
+                }
+            ),
+        ]
+    )
+
+    rep = i3_scada.run(week, W, registry)
+    reg = rep.tables["issues_register"]
+    found = {(r.DUID, r.ISSUE) for r in reg.itertuples()}
+    assert {("WINDA", "spike"), ("WINDA", "stuck"), ("GASG", "no_response")} <= found
+    assert "BATTE" not in set(reg["DUID"])  # swings follow dispatch: not spikes
+    gas_h = reg[reg["DUID"] == "GASH"]
+    assert set(gas_h["ISSUE"]) <= {"spike"} and len(gas_h) <= 2  # never the on-target reading
+    assert t.iloc[301] not in set(gas_h["FIRST"])
+    assert set(reg.loc[reg["DUID"] == "SOLH", "ISSUE"]) == {"brief_departure"}
+    k = reg[reg["DUID"] == "BATTK"]  # one conformance episode, not alternating spikes
+    assert k["ISSUE"].tolist() == ["off_target"] and k["INTERVALS"].iloc[0] == 6
+    assert "below target" not in k["EVIDENCE"].iloc[0]  # charging less than asked is above target
+    m = reg[reg["DUID"] == "BATTM"]
+    assert m["ISSUE"].tolist() == ["spike"] and "not offered" in m["EVIDENCE"].iloc[0]
+    assert ("GASF", "stuck") not in found  # constant target: a setpoint, not frozen telemetry
+    assert rep.numbers["targets_used"] and rep.numbers["stuck_at_setpoint"] >= 1
+    stuck = reg[(reg["DUID"] == "WINDA") & (reg["ISSUE"] == "stuck")]["EVIDENCE"].iloc[0]
+    assert "target moved" in stuck
+    nr = reg[reg["ISSUE"] == "no_response"].iloc[0]
+    assert nr["INTERVALS"] == 6 and "dispatched to 100 MW" in nr["EVIDENCE"]
+    assert "Dispatch targets" in rep.markdown

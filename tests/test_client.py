@@ -180,3 +180,43 @@ def test_weekly_archive_covers_seven_days_and_current_half_hours(tmp_path):
         "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261008233000_0000000001.zip",
         "PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_20261009000000_0000000002.zip",
     ]
+
+
+@responses.activate
+def test_next_day_dispatch_uses_trading_days_current_first_then_monthly_archive(tmp_path):
+    from datetime import date
+
+    base = BASE_URL + "/Reports/{}/Next_Day_Dispatch/"
+    responses.get(
+        base.format("Archive"),
+        body=listing(
+            "PUBLIC_NEXT_DAY_DISPATCH_20260701.zip",
+            "PUBLIC_NEXT_DAY_DISPATCH_20260801.zip",
+            "PUBLIC_NEXT_DAY_DISPATCH_20260901.zip",
+        ),
+    )
+    responses.get(
+        base.format("Current"),
+        body=listing(
+            "PUBLIC_NEXT_DAY_DISPATCH_20260901_0000000001.zip",
+            "PUBLIC_NEXT_DAY_DISPATCH_20261020_0000000002.zip",
+            "PUBLIC_NEXT_DAY_DISPATCH_20261021_0000000003.zip",
+        ),
+    )
+    c = NemwebClient(tmp_path, retries=0)
+    # 21 Oct needs the 20 Oct file too (its 00:05-04:00 is in the previous trading day).
+    names = [n for _, n in c.files_for_dates("next_day_dispatch", [date(2026, 10, 21)])]
+    assert names == [
+        "PUBLIC_NEXT_DAY_DISPATCH_20261020_0000000002.zip",
+        "PUBLIC_NEXT_DAY_DISPATCH_20261021_0000000003.zip",
+    ]
+    # 1 Aug needs 31 Jul: both only in the monthly archive. 1 Sep is in Current,
+    # which is preferred over the 220 MB monthly zip.
+    names = [
+        n for _, n in c.files_for_dates("next_day_dispatch", [date(2026, 8, 1), date(2026, 9, 1)])
+    ]
+    assert names == [
+        "PUBLIC_NEXT_DAY_DISPATCH_20260701.zip",
+        "PUBLIC_NEXT_DAY_DISPATCH_20260801.zip",
+        "PUBLIC_NEXT_DAY_DISPATCH_20260901_0000000001.zip",
+    ]

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import calendar
 import hashlib
 import io
 import logging
@@ -29,7 +30,7 @@ ALLOWED_HOSTS = {"nemweb.com.au", "www.nemweb.com.au"}
 BASE_URL = "https://nemweb.com.au"
 
 # Daily archives keep roughly the last 13 months; "Current" keeps the last day or two.
-REPORTS: dict[str, dict[str, str | int]] = {
+REPORTS: dict[str, dict[str, str | int | bool]] = {
     "dispatchis": {
         "archive": "/Reports/Archive/DispatchIS_Reports/",
         "current": "/Reports/Current/DispatchIS_Reports/",
@@ -49,6 +50,19 @@ REPORTS: dict[str, dict[str, str | int]] = {
         "pattern": r"PUBLIC_ROOFTOP_PV_ACTUAL_MEASUREMENT_(\d{8})(\d{6})?",
         "archive_days": 7,
         "name_marks_end_min": 30,
+    },
+    # Unit dispatch targets (DISPATCH_UNIT_SOLUTION), published the next
+    # morning. A file named for day D covers AEMO's trading day, 04:05 on D
+    # to 04:00 on D+1, so a calendar day also needs the previous day's file.
+    # Current keeps about 13 months of daily files and the archive holds one
+    # ~220 MB zip per month, so Current is tried first.
+    "next_day_dispatch": {
+        "archive": "/Reports/Archive/Next_Day_Dispatch/",
+        "current": "/Reports/Current/Next_Day_Dispatch/",
+        "pattern": r"PUBLIC_NEXT_DAY_DISPATCH_(\d{8})",
+        "archive_days": 0,  # 0 = the whole calendar month
+        "trading_day": True,
+        "prefer_current": True,
     },
 }
 
@@ -140,42 +154,61 @@ class NemwebClient:
         return sorted({safe_name(h) for h in HREF.findall(html)})
 
     def files_for_dates(self, report: str, days: list[date]) -> list[tuple[str, str]]:
-        """Pick the (url, name) for each requested day, trying the archive first."""
+        """Pick the (url, name) for each requested day from the archive and Current listings."""
         spec = REPORTS[report]
+        wanted = {d.strftime("%Y%m%d") for d in days}
+        if spec.get("trading_day"):
+            # 00:05 to 04:00 of each day is in the previous trading day's file.
+            wanted |= {(d - timedelta(days=1)).strftime("%Y%m%d") for d in days}
+        picked: dict[str, list[tuple[str, str]]] = {}
+        sources = ["current", "archive"] if spec.get("prefer_current") else ["archive", "current"]
+        for source in sources:
+            missing = wanted - picked.keys()
+            if not missing:
+                break
+            scan = self._scan_archive if source == "archive" else self._scan_current
+            for day, files in scan(spec, missing).items():
+                picked.setdefault(day, []).extend(files)
+
+        for d in sorted(wanted - picked.keys()):
+            log.warning("no file found for day", extra={"report": report, "day": d})
+        return [f for d in sorted(picked) for f in picked[d]]
+
+    def _scan_archive(self, spec: dict, wanted: set[str]) -> dict[str, list[tuple[str, str]]]:
+        """Archive files cover one day, several days, or (archive_days 0) a calendar month.
+
+        A file covering several wanted days is listed once, under the first.
+        """
         pattern = re.compile(str(spec["pattern"]))
         span = int(spec.get("archive_days", 1))
-        wanted = {d.strftime("%Y%m%d") for d in days}
         picked: dict[str, list[tuple[str, str]]] = {}
-
-        # Archive: one zip per day (or per week for some reports). The pattern
-        # matches the leading YYYYMMDD, so it also matches the 5-minute names
-        # in Current (YYYYMMDDHHMM_...).
         for name in self.list_files(str(spec["archive"])):
             m = pattern.match(name)
             if not m:
                 continue
             first = datetime.strptime(m.group(1), "%Y%m%d")
-            covered = {(first + timedelta(days=i)).strftime("%Y%m%d") for i in range(span)}
+            n = span or calendar.monthrange(first.year, first.month)[1]
+            covered = {(first + timedelta(days=i)).strftime("%Y%m%d") for i in range(n)}
             hits = sorted(covered & wanted)
             if hits:
-                url = urljoin(BASE_URL, str(spec["archive"]) + name)
-                picked.setdefault(hits[0], []).append((url, name))
+                picked.setdefault(hits[0], []).append(
+                    (urljoin(BASE_URL, str(spec["archive"]) + name), name)
+                )
                 for d in hits[1:]:
                     picked.setdefault(d, [])
+        return picked
 
-        missing = wanted - picked.keys()
-        if missing:
-            # Recent days are only published as 5-minute (or 30-minute) files in Current.
-            for name in self.list_files(str(spec["current"])):
-                m = pattern.match(name)
-                if m and _current_day(m, spec) in missing:
-                    picked.setdefault(_current_day(m, spec), []).append(
-                        (urljoin(BASE_URL, str(spec["current"]) + name), name)
-                    )
-
-        for d in sorted(wanted - picked.keys()):
-            log.warning("no file found for day", extra={"report": report, "day": d})
-        return [f for d in sorted(picked) for f in picked[d]]
+    def _scan_current(self, spec: dict, wanted: set[str]) -> dict[str, list[tuple[str, str]]]:
+        """Current files: one per day, or one per 5 or 30 minutes, matched to their day."""
+        pattern = re.compile(str(spec["pattern"]))
+        picked: dict[str, list[tuple[str, str]]] = {}
+        for name in self.list_files(str(spec["current"])):
+            m = pattern.match(name)
+            if m and _current_day(m, spec) in wanted:
+                picked.setdefault(_current_day(m, spec), []).append(
+                    (urljoin(BASE_URL, str(spec["current"]) + name), name)
+                )
+        return picked
 
     def fetch(self, url: str, name: str) -> FetchedFile:
         name = safe_name(name)
@@ -223,4 +256,6 @@ def iter_csv_texts(zip_bytes: bytes, depth: int = 0):
             if lower.endswith(".zip"):
                 yield from iter_csv_texts(data, depth + 1)
             elif lower.endswith(".csv"):
-                yield info.filename, data.decode("utf-8", errors="replace")
+                text = data.decode("utf-8", errors="replace")
+                del data  # a day of unit targets is ~120 MB; don't hold it twice
+                yield info.filename, text

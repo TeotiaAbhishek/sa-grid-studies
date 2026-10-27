@@ -248,8 +248,45 @@ UNIT_SCADA = Dataset(
     ),
 )
 
+# Each unit's dispatch target for the interval (TOTALCLEARED) and the reading
+# dispatch started from (INITIALMW, which equals DISPATCH_UNIT_SCADA for the
+# same SETTLEMENTDATE). Batteries have negative targets when charging.
+UNIT_SOLUTION = Dataset(
+    name="unit_solution",
+    source_table="DISPATCH_UNIT_SOLUTION",
+    report="next_day_dispatch",
+    columns={
+        "SETTLEMENTDATE": "datetime",
+        "DUID": "str",
+        "INTERVENTION": "int",
+        "INITIALMW": "float",
+        "TOTALCLEARED": "float",
+        "AVAILABILITY": "float",
+        "SEMIDISPATCHCAP": "float",
+        "UIGF": "float",
+    },
+    optional=("UIGF",),
+    key=("SETTLEMENTDATE", "DUID"),
+    row_filter={"INTERVENTION": ("0",)},
+    schema=pa.DataFrameSchema(
+        {
+            "SETTLEMENTDATE": TS,
+            "DUID": pa.Column(str, pa.Check.str_matches(DUID_PATTERN)),
+            "INTERVENTION": pa.Column(int, pa.Check.isin([0])),
+            "INITIALMW": _num(-1000, 2500, nullable=True),
+            "TOTALCLEARED": _num(-1000, 2500),
+            "AVAILABILITY": _num(0, 5000, nullable=True),
+            # 1 when a semi-scheduled unit's target is a cap, not a forecast
+            "SEMIDISPATCHCAP": _num(0, 1, nullable=True),
+            "UIGF": _num(0, 2500, nullable=True),
+        },
+        unique=["SETTLEMENTDATE", "DUID"],
+    ),
+)
+
 DATASETS = {
-    d.name: d for d in (REGIONSUM, PRICE, INTERCONNECTOR, CONSTRAINT, ROOFTOP_PV, UNIT_SCADA)
+    d.name: d
+    for d in (REGIONSUM, PRICE, INTERCONNECTOR, CONSTRAINT, ROOFTOP_PV, UNIT_SCADA, UNIT_SOLUTION)
 }
 
 
