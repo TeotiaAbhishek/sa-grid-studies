@@ -9,7 +9,8 @@ Written as if for review by a data governance team.
 | DISPATCHIS reports (region summary, prices, interconnectors, constraints) | AEMO | NEMWEB `Reports/Archive/DispatchIS_Reports` (daily) and `Reports/Current/DispatchIS_Reports` (5-minute) | Every 5 minutes; daily archive kept about 13 months |
 | Dispatch SCADA | AEMO | NEMWEB `Reports/Archive/Dispatch_SCADA` and `Reports/Current/Dispatch_SCADA` | As above |
 | Rooftop PV actual (MEASUREMENT estimate) | AEMO | NEMWEB `Reports/Archive/ROOFTOP_PV/ACTUAL` (weekly zips) and `Reports/Current/ROOFTOP_PV/ACTUAL` (30-minute) | Every 30 minutes; weekly archive appears about two weeks after the week starts |
-| NEM Registration and Exemption List | AEMO | aemo.com.au (downloaded by hand) | Updated by AEMO as units register or change |
+| MMSDM registration tables (DUDETAILSUMMARY, DUDETAIL, DUALLOC, GENUNITS) | AEMO | NEMWEB `Data_Archive/Wholesale_Electricity/MMSDM` (monthly) | Monthly, a few weeks after month end |
+| NEM Registration and Exemption List (optional alternative) | AEMO | aemo.com.au (downloaded by hand) | Updated by AEMO as units register or change |
 
 ## Licence and attribution
 

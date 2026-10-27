@@ -248,8 +248,8 @@ def _figure(recon: pd.DataFrame, cps: list[int]):
 def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
     if registry is None:
         raise ValueError(
-            "I3 needs the generator registry (NEM Registration and Exemption List); "
-            "set registry_path in sagrid.toml"
+            "I3 needs the generator registry; run `sagrid registry` "
+            "(or set registry_path in sagrid.toml)"
         )
     scada = read_window(store, "unit_scada", w)
     if scada.empty:

@@ -18,6 +18,10 @@ NEM_TIME_FORMAT = "%Y/%m/%d %H:%M:%S"  # AEMO market time, AEST (UTC+10, no dayl
 SA_REGION = "SA1"
 SA_INTERCONNECTORS = ("V-SA", "V-S-MNSP1")  # Heywood, Murraylink
 
+# AEMO unit IDs are upper case and may contain "-", "#" and "/" (OSB-AG,
+# TARONG#1, W/HOE#1) after a leading letter or digit; anything else is refused.
+DUID_PATTERN = r"^[A-Z0-9][A-Z0-9_#/\-]{0,19}$"
+
 
 @dataclass(frozen=True)
 class Dataset:
@@ -237,7 +241,7 @@ UNIT_SCADA = Dataset(
     schema=pa.DataFrameSchema(
         {
             "SETTLEMENTDATE": TS,
-            "DUID": pa.Column(str, pa.Check.str_matches(r"^[A-Z0-9_]{1,20}$")),
+            "DUID": pa.Column(str, pa.Check.str_matches(DUID_PATTERN)),
             "SCADAVALUE": _num(-1000, 2500),
         },
         unique=["SETTLEMENTDATE", "DUID"],
