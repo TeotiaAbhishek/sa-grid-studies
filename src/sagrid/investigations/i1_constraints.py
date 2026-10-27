@@ -440,7 +440,7 @@ def _markdown(numbers, clean, penalty, sa, models) -> str:
                 [
                     "This model does little better than chance on days it did not see "
                     f"(fewer than {MIN_FOLDS} usable folds or AUC below {USEFUL_AUC}), so the "
-                    "odds ratios below are not a reliable explanation. The constraint is likely "
+                    "odds ratios above are not a reliable explanation. The constraint is likely "
                     "driven by something outside these inputs, such as conditions in another "
                     "region or a network outage.",
                     "",

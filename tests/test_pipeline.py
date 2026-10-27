@@ -111,3 +111,20 @@ def test_date_range_validation():
         date_range(END, START)
     with pytest.raises(ValueError, match="400"):
         date_range(START, START + timedelta(days=500))
+
+
+def test_reload_replaces_a_files_old_rejects(store):
+    from sagrid.pipeline import load_texts
+    from sagrid.schemas import DATASETS
+
+    t = datetime(2026, 10, 1, 0, 5)
+    bad = dispatchis_csv(t, price=30000.0)  # above the market price cap
+    good = dispatchis_csv(t)
+    price = [DATASETS["price"]]
+    _, j = load_texts([("a.CSV", bad)], price, store, "r1", "A.zip")
+    load_texts([("b.CSV", bad)], price, store, "r1", "B.zip")
+    assert j["price"] == 1
+
+    load_texts([("a.CSV", good)], price, store, "r2", "A.zip")  # A fixed upstream, reloaded
+    left = store.con.execute("SELECT source_file, count(*) FROM rejects GROUP BY 1").fetchall()
+    assert left == [("B.zip", 1)]

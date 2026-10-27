@@ -8,6 +8,7 @@ integration test in tests/test_integration_real.py.
 from __future__ import annotations
 
 import io
+import os
 import zipfile
 from datetime import datetime, timedelta
 
@@ -126,6 +127,19 @@ def daily_archive(
         name = f"{prefix}_{t:%Y%m%d%H%M}_0000000{i:09d}"
         inner[name + ".zip"] = zip_of({name + ".CSV": csv_builder(t, 1).encode()})
     return zip_of(inner)
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(tmp_path, monkeypatch):
+    """Keep tests away from a real sagrid.toml, data folder or SAGRID_* settings.
+
+    Without this, a test run in a working clone picks up that clone's
+    data/registry.csv or sagrid.toml and behaves differently from CI.
+    """
+    for key in [k for k in os.environ if k.startswith("SAGRID_")]:
+        if key != "SAGRID_NETWORK_TESTS":
+            monkeypatch.delenv(key)
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture

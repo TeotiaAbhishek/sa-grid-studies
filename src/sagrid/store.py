@@ -102,6 +102,16 @@ class Store:
         self.con.executemany("INSERT INTO rejects VALUES (?, ?, ?, ?, ?)", rows)
         return len(rows)
 
+    def clear_rejects(self, dataset: str, source_file: str) -> None:
+        """Drop earlier rejects from a file that is being loaded again.
+
+        A reload replaces that file's rows, so its old rejects no longer
+        describe the data. The run manifest keeps the history.
+        """
+        self.con.execute(
+            "DELETE FROM rejects WHERE dataset = ? AND source_file = ?", [dataset, source_file]
+        )
+
     def file_loaded(self, name: str, sha256: str) -> bool:
         row = self.con.execute(
             "SELECT sha256 FROM loaded_files WHERE source_file = ?", [name]

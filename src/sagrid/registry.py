@@ -105,14 +105,23 @@ MMSDM_TABLES = ("DUDETAILSUMMARY", "DUDETAIL", "DUALLOC", "GENUNITS")
 MMS_TIME = "%Y/%m/%d %H:%M:%S"
 
 
-def mmsdm_file(table: str, y: int, m: int) -> tuple[str, str]:
-    """(URL path, safe local name) of one monthly registration table.
+def mmsdm_files(table: str, y: int, m: int) -> list[tuple[str, str]]:
+    """Candidate (URL path, safe local name) pairs for one monthly registration table.
 
-    AEMO names these files with "#" separators, which must be sent as %23.
+    Recent months name files with "#" separators, which must be sent as
+    %23 (PUBLIC_ARCHIVE#DUDETAIL#FILE01#202609010000.zip). Older months
+    use PUBLIC_DVD_DUDETAIL_202401010000.zip. Each month's file holds the
+    table's full history, so one month is a complete snapshot.
     """
-    remote = f"PUBLIC_ARCHIVE%23{table}%23FILE01%23{y}{m:02d}010000.zip"
-    local = f"PUBLIC_ARCHIVE_{table}_FILE01_{y}{m:02d}010000.zip"
-    return MMSDM_DIR.format(y=y, m=m) + remote, local
+    folder = MMSDM_DIR.format(y=y, m=m)
+    stamp = f"{y}{m:02d}010000"
+    return [
+        (
+            f"{folder}PUBLIC_ARCHIVE%23{table}%23FILE01%23{stamp}.zip",
+            f"PUBLIC_ARCHIVE_{table}_FILE01_{stamp}.zip",
+        ),
+        (f"{folder}PUBLIC_DVD_{table}_{stamp}.zip", f"PUBLIC_DVD_{table}_{stamp}.zip"),
+    ]
 
 
 def _dates(s: pd.Series) -> pd.Series:
@@ -120,15 +129,21 @@ def _dates(s: pd.Series) -> pd.Series:
 
 
 def _latest(df: pd.DataFrame, on: datetime, date_col: str) -> pd.DataFrame:
-    """Rows in force on `on`: effective by then, latest date and version per DUID."""
+    """Rows in force on `on`: per DUID the latest effective date, then the highest version on it.
+
+    Versions restart at 1 on each new effective date (OSB-AG's 2000 row is
+    version 39, its 2024 row version 1), so the two must be taken in that
+    order, not separately. Every row at the chosen date and version is
+    kept, because one DUID can map to several generating sets.
+    """
     d = df.assign(_D=_dates(df[date_col]))
     d = d[d["_D"] <= on]
     if "VERSIONNO" in d:
-        d = d.assign(_V=pd.to_numeric(d["VERSIONNO"], errors="coerce"))
+        d = d.assign(_V=pd.to_numeric(d["VERSIONNO"], errors="coerce").fillna(0))
     else:
         d = d.assign(_V=0)
-    top = d.groupby("DUID")[["_D", "_V"]].transform("max")
-    return d[(d["_D"] == top["_D"]) & (d["_V"] == top["_V"])]
+    d = d[d["_D"] == d.groupby("DUID")["_D"].transform("max")]
+    return d[d["_V"] == d.groupby("DUID")["_V"].transform("max")]
 
 
 def build_registry(tables: dict[str, pd.DataFrame], on: datetime) -> pd.DataFrame:
@@ -194,8 +209,8 @@ def fetch_registry(client, on: date, months_back: int = 3) -> tuple[pd.DataFrame
         try:
             tables = {}
             for table in MMSDM_TABLES:
-                path, local = mmsdm_file(table, y, m)
-                fetched = client.fetch(urljoin(BASE_URL, path), local)
+                candidates = [(urljoin(BASE_URL, p), n) for p, n in mmsdm_files(table, y, m)]
+                fetched = _fetch_first(client, candidates)
                 for _member, text in iter_csv_texts(fetched.path.read_bytes()):
                     parsed = parse_aemo_csv(text, wanted={f"PARTICIPANT_REGISTRATION_{table}"})
                     tables[table] = parsed.tables[f"PARTICIPANT_REGISTRATION_{table}"]
@@ -207,3 +222,16 @@ def fetch_registry(client, on: date, months_back: int = 3) -> tuple[pd.DataFrame
             )
             last_error = exc
     raise RegistryError(f"no MMSDM registration tables found before {on}: {last_error}")
+
+
+def _fetch_first(client, candidates: list[tuple[str, str]]):
+    """Fetch the first (url, local name) candidate that exists, else raise the last error."""
+    from sagrid.nemweb.client import DownloadError
+
+    last = DownloadError("no candidate files")
+    for url, local in candidates:
+        try:
+            return client.fetch(url, local)
+        except DownloadError as exc:
+            last = exc
+    raise last

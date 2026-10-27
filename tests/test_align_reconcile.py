@@ -3,6 +3,7 @@ from datetime import date, datetime
 import pandas as pd
 
 from sagrid.align import aggregate, expected_intervals, find_gaps
+from sagrid.reconcile import SCADA_LAG as LAG
 from sagrid.reconcile import region_balance, scada_vs_dispatch, summarise
 
 D = date(2026, 10, 1)
@@ -64,7 +65,7 @@ def test_scada_vs_dispatch_uses_only_sa_generators():
     )
     scada = pd.DataFrame(
         {
-            "SETTLEMENTDATE": list(rs["SETTLEMENTDATE"]) * 3,
+            "SETTLEMENTDATE": list(rs["SETTLEMENTDATE"] + LAG) * 3,
             "DUID": ["A"] * 3 + ["B"] * 3 + ["VICX"] * 3,
             "SCADAVALUE": [700.0] * 3 + [600.0] * 3 + [9999.0] * 3,
         }
@@ -74,10 +75,47 @@ def test_scada_vs_dispatch_uses_only_sa_generators():
     assert not out["flag"].any()
 
 
+def test_scada_vs_dispatch_counts_battery_output_but_not_charging_or_non_scheduled():
+    rs = _rs([1500.0] * 3)  # 1300 MW dispatched generation in each interval
+    reg = pd.DataFrame(
+        {
+            "DUID": ["GEN", "BATT", "SMALL"],
+            "REGIONID": ["SA1"] * 3,
+            "DISPATCHTYPE": ["GENERATOR", "BIDIRECTIONAL", "GENERATOR"],
+            "SCHEDULE_TYPE": ["SCHEDULED", "SCHEDULED", "NON-SCHEDULED"],
+        }
+    )
+    t = list(rs["SETTLEMENTDATE"] + LAG)
+    scada = pd.DataFrame(
+        {
+            "SETTLEMENTDATE": t * 3,
+            "DUID": ["GEN"] * 3 + ["BATT"] * 3 + ["SMALL"] * 3,
+            # the battery discharges 200 MW, then idles, then charges 100 MW
+            "SCADAVALUE": [1100.0, 1300.0, 1300.0, 200.0, 0.0, -100.0] + [40.0] * 3,
+        }
+    )
+    out = scada_vs_dispatch(rs, scada, reg)
+    assert out["scada_generation"].tolist() == [1300.0, 1300.0, 1300.0]
+    assert not out["flag"].any()
+
+
+def test_scada_reading_stamped_next_interval_is_compared_with_dispatch():
+    # A unit ramping 1000 -> 1300 MW: dispatch targets 1300 for the first interval, and the
+    # reading stamped at its end (start of the next interval) is what shows it got there.
+    rs = _rs([1500.0] * 3)
+    reg = pd.DataFrame({"DUID": ["A"], "REGIONID": ["SA1"], "DISPATCHTYPE": ["GENERATOR"]})
+    t = list(rs["SETTLEMENTDATE"])
+    scada = pd.DataFrame(
+        {"SETTLEMENTDATE": t + [t[-1] + LAG], "DUID": "A", "SCADAVALUE": [1000.0] + [1300.0] * 3}
+    )
+    out = scada_vs_dispatch(rs, scada, reg)
+    assert out["residual_mw"].tolist() == [0.0, 0.0, 0.0]
+
+
 def test_scada_missing_interval_is_flagged():
     rs = _rs([1500.0] * 3)
     reg = pd.DataFrame({"DUID": ["A"], "REGIONID": ["SA1"], "DISPATCHTYPE": ["GENERATOR"]})
     scada = pd.DataFrame(
-        {"SETTLEMENTDATE": rs["SETTLEMENTDATE"][:2], "DUID": "A", "SCADAVALUE": 1300.0}
+        {"SETTLEMENTDATE": rs["SETTLEMENTDATE"][:2] + LAG, "DUID": "A", "SCADAVALUE": 1300.0}
     )
     assert scada_vs_dispatch(rs, scada, reg)["flag"].tolist() == [False, False, True]

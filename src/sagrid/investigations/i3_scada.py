@@ -21,7 +21,7 @@ from sagrid.investigations.common import (
     snapshot,
     snapshot_md,
 )
-from sagrid.reconcile import scada_vs_dispatch
+from sagrid.reconcile import SCADA_LAG, scada_vs_dispatch
 from sagrid.store import Store
 
 TABLES = ("region_summary", "unit_scada")
@@ -241,7 +241,7 @@ def _figure(recon: pd.DataFrame, cps: list[int]):
         ax.axvline(recon["SETTLEMENTDATE"].iloc[k], color="#c0392b", lw=1, ls="--")
     ax.axhline(0, color="#888", lw=0.5)
     ax.set_ylabel("SCADA minus dispatch (MW)")
-    ax.set_title("SA generator SCADA total vs dispatched generation, with detected shifts")
+    ax.set_title("SA SCADA generation total vs dispatched generation, with detected shifts")
     return fig
 
 
@@ -257,6 +257,8 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
             "no unit_scada rows in the window; run sagrid ingest --datasets unit_scada"
         )
     rs = read_window(store, "region_summary", w)
+    # The reading at the end of the window's last interval is stamped one interval later.
+    scada_end = read_window(store, "unit_scada", w, extend=SCADA_LAG)
     snap = snapshot(store, w, list(TABLES))
 
     units = registry[registry["REGIONID"] == "SA1"].copy()
@@ -282,7 +284,9 @@ def run(store: Store, w: Window, registry: pd.DataFrame | None) -> Report:
     )
 
     recon = (
-        scada_vs_dispatch(rs, scada, registry).sort_values("SETTLEMENTDATE").reset_index(drop=True)
+        scada_vs_dispatch(rs, scada_end, registry)
+        .sort_values("SETTLEMENTDATE")
+        .reset_index(drop=True)
     )
     resid = recon["residual_mw"]
     cps = change_points(resid.fillna(resid.median()))
@@ -363,7 +367,9 @@ def _markdown(nb, issues, summary, seg_df) -> str:
         "- **Missing:** intervals with no reading from a unit that reported at other times.",
         "- **Change points** in the gap between the SA SCADA total and dispatched generation, "
         "found by binary segmentation with a BIC-style penalty. A step in that gap points to a "
-        "unit whose telemetry changed.",
+        "unit whose telemetry changed. The SCADA total covers scheduled and semi-scheduled "
+        "generators plus battery output (not charging), which is what dispatched generation "
+        "counts.",
         "",
         "## Findings",
         f"- {nb['issues']} issues across {nb['units_with_issues']} of {nb['sa_units_reporting']} "

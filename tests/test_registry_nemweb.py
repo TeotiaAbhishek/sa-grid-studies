@@ -12,7 +12,7 @@ import responses
 
 from sagrid.nemweb.client import BASE_URL, NemwebClient
 from sagrid.nemweb.parser import parse_aemo_csv
-from sagrid.registry import RegistryError, build_registry, fetch_registry, mmsdm_file
+from sagrid.registry import RegistryError, build_registry, fetch_registry, mmsdm_files
 from sagrid.schemas import UNIT_SCADA, select_and_type, validate
 from tests.conftest import zip_of
 
@@ -53,20 +53,29 @@ ROWS = {
         f"{T.format('2024/06')},LKBONNY2,1,SMAY2,33,159,N,GENERATOR,159",
         f"{T.format('2030/01')},LKBONNY2,1,SMAY2,33,999,N,GENERATOR,999",  # future: ignored
         f"{T.format('2024/09')},HPR1,1,SMTL3H,275,150,Y,BIDIRECTIONAL,150",
-        f"{T.format('2020/01')},OSB-AG,1,SOSB,66,180,Y,GENERATOR,180",
+        # Real pattern: an old row with a high version, newer rows back at version 1,
+        # not in date order, and a same-day correction (version 2 wins over 1).
+        f"{T.format('2024/06')},OSB-AG,1,SOSB,66,170,Y,GENERATOR,170",
+        f"{T.format('2000/02')},OSB-AG,39,SOSB,66,180,Y,GENERATOR,204",
+        f"{T.format('2024/06')},OSB-AG,2,SOSB,66,180,Y,GENERATOR,204",
+        f"{T.format('2011/01')},OSB-AG,1,SOSB,66,180,Y,GENERATOR,204",
         f"{T.format('2020/01')},VICX,1,VX,66,500,Y,GENERATOR,500",
     ],
     "DUALLOC": [
         f"{T.format('2007/05')},1,LKBONNY2,LKBONNEY2A,x",
         f"{T.format('2007/05')},1,LKBONNY2,LKBONNEY2B,x",
         f"{T.format('2024/09')},1,HPR1,HPR1,x",
-        f"{T.format('2020/01')},1,OSB-AG,OSB-AG,x",
+        f"{T.format('2000/02')},39,OSB-AG,OSB-OLD,x",
+        f"{T.format('2016/07')},1,OSB-AG,OSB01,x",
+        f"{T.format('2016/07')},1,OSB-AG,OSB02,x",
     ],
     "GENUNITS": [
         "LKBONNEY2A,,,Y,N,N,33,63,GROSS/NET,SLOW,Y,N,63,GENERATOR,,x,0,Wind",
         "LKBONNEY2B,,,Y,N,N,33,96,GROSS/NET,SLOW,Y,N,96,GENERATOR,,x,0,Wind",
         'HPR1,,,N,Y,N,275,150,GROSS/NET,SLOW,Y,N,150,BIDIRECTIONAL,,x,0,"Battery Storage"',
-        'OSB-AG,,,N,Y,N,66,180,GROSS/NET,SLOW,Y,N,180,GENERATOR,,x,0,"Natural Gas (Pipeline)"',
+        'OSB01,,,N,Y,N,66,118,GROSS/NET,SLOW,Y,N,136,GENERATOR,,x,0,"Natural Gas (Pipeline)"',
+        'OSB02,,,N,Y,N,66,62,GROSS/NET,SLOW,Y,N,68,GENERATOR,,x,0,"Natural Gas (Pipeline)"',
+        "OSB-OLD,,,N,Y,N,66,180,GROSS/NET,SLOW,Y,N,180,GENERATOR,,x,0,Diesel",
     ],
 }
 
@@ -93,6 +102,11 @@ def test_build_registry_uses_rows_in_force_and_joins_fuel():
     assert reg.loc["HPR1", "DISPATCHTYPE"] == "BIDIRECTIONAL"
     assert reg.loc["HPR1", "FUEL"] == "Battery Storage"
     assert reg.loc["OSB-AG", "STATION"] == "OSBORNE"
+    # latest date first, then the highest version on that date
+    assert reg.loc["OSB-AG", ["REG_CAP_MW", "MAX_CAP_MW"]].tolist() == [180, 204]
+    assert (
+        reg.loc["OSB-AG", "FUEL"] == "Natural Gas (Pipeline)"
+    )  # both current gensets, not OSB-OLD
     assert pd.isna(reg.loc["VICX", "FUEL"])  # no genset mapping
     assert reg.loc["VICX", "REGIONID"] == "VIC1"
 
@@ -100,9 +114,9 @@ def test_build_registry_uses_rows_in_force_and_joins_fuel():
 @responses.activate
 def test_fetch_registry_falls_back_to_an_earlier_month(tmp_path):
     for table in HEADERS:
-        path, _ = mmsdm_file(table, 2026, 9)
-        responses.get(BASE_URL + path, status=404)
-        path, _ = mmsdm_file(table, 2026, 8)
+        for path, _ in mmsdm_files(table, 2026, 9):
+            responses.get(BASE_URL + path, status=404)
+        path, _ = mmsdm_files(table, 2026, 8)[0]
         body = zip_of(
             {f"PUBLIC_ARCHIVE#{table}#FILE01#202608010000.CSV": mmsdm_csv(table).encode()}
         )
@@ -110,6 +124,20 @@ def test_fetch_registry_falls_back_to_an_earlier_month(tmp_path):
     reg, month = fetch_registry(NemwebClient(tmp_path, retries=0), date(2026, 10, 19))
     assert month == "2026-08" and len(reg) == 4
     assert "%23DUDETAILSUMMARY%23" in responses.calls[0].request.url  # "#" sent encoded
+
+
+@responses.activate
+def test_fetch_registry_reads_older_dvd_file_names(tmp_path):
+    for table in HEADERS:
+        new, old = mmsdm_files(table, 2024, 1)
+        responses.get(BASE_URL + new[0], status=404)
+        body = zip_of({f"PUBLIC_DVD_{table}_202401010000.CSV": mmsdm_csv(table).encode()})
+        responses.get(BASE_URL + old[0], body=body)
+    reg, month = fetch_registry(NemwebClient(tmp_path, retries=0), date(2024, 2, 19))
+    assert month == "2024-01" and "OSB-AG" in set(reg["DUID"])
+    assert "PUBLIC_DVD_DUDETAIL_202401010000.zip" in {
+        c.request.url.rsplit("/", 1)[1] for c in responses.calls
+    }
 
 
 @responses.activate

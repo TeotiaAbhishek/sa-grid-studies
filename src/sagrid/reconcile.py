@@ -12,8 +12,16 @@ the independent one.
 
 Check 2 (SCADA vs dispatch), needs the unit registry:
 
-    sum of SA generating units' SCADA output ~= DISPATCHABLEGENERATION
+    sum of SA dispatched units' SCADA output ~= DISPATCHABLEGENERATION
 
+DISPATCHABLEGENERATION covers scheduled and semi-scheduled units,
+including the generating side of batteries (bidirectional units), so
+those are summed too: a battery's positive SCADA reading is output, a
+negative one is charging and belongs to DISPATCHABLELOAD instead.
+Non-scheduled units are left out because dispatch does not include them.
+DISPATCH_UNIT_SCADA stamped t is the reading at the start of interval t
+(on real data it equals UNIT_SOLUTION.INITIALMW for t exactly), so the
+output at the end of interval t is the reading stamped t + 5 minutes.
 SCADA is metered output and dispatch is a target, so this tolerance is wider.
 Both tolerances and the evidence behind them are in docs/decisions.md.
 """
@@ -24,6 +32,7 @@ import pandas as pd
 
 BALANCE_TOLERANCE_MW = 1.0
 SCADA_TOLERANCE_MW = 150.0
+SCADA_LAG = pd.Timedelta(minutes=5)
 
 
 def region_balance(regionsum: pd.DataFrame, tol_mw: float = BALANCE_TOLERANCE_MW) -> pd.DataFrame:
@@ -50,12 +59,17 @@ def scada_vs_dispatch(
     registry: pd.DataFrame,
     tol_mw: float = SCADA_TOLERANCE_MW,
 ) -> pd.DataFrame:
-    """Compare summed SA generator SCADA with dispatched generation per interval."""
-    sa_gens = registry.loc[
-        (registry["REGIONID"] == "SA1") & (registry["DISPATCHTYPE"] == "GENERATOR"), "DUID"
-    ]
-    s = scada[scada["DUID"].isin(sa_gens)]
-    total = s.groupby("SETTLEMENTDATE")["SCADAVALUE"].sum().rename("scada_generation").reset_index()
+    """Compare summed SA generation SCADA with dispatched generation per interval."""
+    keep = (registry["REGIONID"] == "SA1") & registry["DISPATCHTYPE"].isin(
+        ["GENERATOR", "BIDIRECTIONAL"]
+    )
+    if "SCHEDULE_TYPE" in registry:  # the hand-downloaded workbook has no schedule type
+        keep &= registry["SCHEDULE_TYPE"].isin(["SCHEDULED", "SEMI-SCHEDULED"])
+    s = scada[scada["DUID"].isin(registry.loc[keep, "DUID"])]
+    s = s.assign(SETTLEMENTDATE=s["SETTLEMENTDATE"] - SCADA_LAG)  # reading at end of interval
+    storage = s["DUID"].isin(registry.loc[registry["DISPATCHTYPE"] == "BIDIRECTIONAL", "DUID"])
+    value = s["SCADAVALUE"].where(~storage, s["SCADAVALUE"].clip(lower=0))
+    total = value.groupby(s["SETTLEMENTDATE"]).sum().rename("scada_generation").reset_index()
     df = regionsum[["SETTLEMENTDATE", "DISPATCHABLEGENERATION"]].merge(
         total, on="SETTLEMENTDATE", how="left"
     )
