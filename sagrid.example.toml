@@ -11,4 +11,4 @@ backoff_s = 2.0
 timeout_s = 60.0
 max_reject_rate = 0.01
 max_staleness_hours = 36.0
-balance_tolerance_mw = 50.0
+balance_tolerance_mw = 1.0
