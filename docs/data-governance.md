@@ -6,7 +6,7 @@ Written as if for review by a data governance team.
 
 | Dataset | Publisher | Location | Refresh |
 | --- | --- | --- | --- |
-| DISPATCHIS reports (region summary, interconnectors, constraints) | AEMO | NEMWEB `Reports/Archive/DispatchIS_Reports` (daily) and `Reports/Current/DispatchIS_Reports` (5-minute) | Every 5 minutes; daily archive kept about 13 months |
+| DISPATCHIS reports (region summary, prices, interconnectors, constraints) | AEMO | NEMWEB `Reports/Archive/DispatchIS_Reports` (daily) and `Reports/Current/DispatchIS_Reports` (5-minute) | Every 5 minutes; daily archive kept about 13 months |
 | Dispatch SCADA | AEMO | NEMWEB `Reports/Archive/Dispatch_SCADA` and `Reports/Current/Dispatch_SCADA` | As above |
 | NEM Registration and Exemption List | AEMO | aemo.com.au (downloaded by hand) | Updated by AEMO as units register or change |
 

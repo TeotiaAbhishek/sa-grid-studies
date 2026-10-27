@@ -20,6 +20,10 @@ REGIONSUM_COLS = (
     "DEMAND_AND_NONSCHEDGEN,DISPATCHABLEGENERATION,DISPATCHABLELOAD,"
     "NETINTERCHANGE,TOTALINTERMITTENTGENERATION"
 )
+PRICE_COLS = (
+    "SETTLEMENTDATE,RUNNO,REGIONID,DISPATCHINTERVAL,INTERVENTION,RRP,EEP,ROP,APCFLAG,"
+    "MARKETSUSPENDEDFLAG,LASTCHANGED,RAISEREGRRP,LOWERREGRRP,PRICE_STATUS"
+)
 IC_COLS = (
     "SETTLEMENTDATE,RUNNO,INTERCONNECTORID,DISPATCHINTERVAL,INTERVENTION,MWFLOW,"
     "METEREDMWFLOW,MWLOSSES,EXPORTLIMIT,IMPORTLIMIT"
@@ -39,6 +43,7 @@ def dispatchis_csv(
     n: int = 1,
     footer: bool = True,
     demand: float = 1500.0,
+    price: float = 85.0,
     extra_rows: list[str] | None = None,
 ) -> str:
     lines = ["C,NEMP.WORLD,DISPATCHIS,AEMO,PUBLIC,2026/10/01,00:00:05,1,DISPATCHIS,1"]
@@ -48,6 +53,11 @@ def dispatchis_csv(
         # gen 1300 - load 0 - netinterchange(-200, i.e. importing 200) = demand 1500
         lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,SA1,1,0,{demand},1550,1300,0,-200,600")
         lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,VIC1,1,0,5000,5100,5200,0,200,900")
+    lines.append("I,DISPATCH,PRICE,5," + PRICE_COLS)
+    for i in range(n):
+        t = ts(start + timedelta(minutes=5 * i))
+        lines.append(f"D,DISPATCH,PRICE,5,{t},1,SA1,1,0,{price},0,{price},0,0,{t},12.5,8.1,FIRM")
+        lines.append(f"D,DISPATCH,PRICE,5,{t},1,VIC1,1,0,60,0,60,0,0,{t},10,5,FIRM")
     lines.append("I,DISPATCH,INTERCONNECTORRES,3," + IC_COLS)
     for i in range(n):
         t = ts(start + timedelta(minutes=5 * i))

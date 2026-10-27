@@ -4,7 +4,14 @@ import pandas as pd
 import pytest
 
 from sagrid.nemweb.parser import parse_aemo_csv
-from sagrid.schemas import CONSTRAINT, INTERCONNECTOR, REGIONSUM, select_and_type, validate
+from sagrid.schemas import (
+    CONSTRAINT,
+    INTERCONNECTOR,
+    PRICE,
+    REGIONSUM,
+    select_and_type,
+    validate,
+)
 from tests.conftest import dispatchis_csv
 
 T0 = datetime(2026, 10, 1, 0, 5)
@@ -67,3 +74,32 @@ def test_validate_empty_frame():
     typed, _ = select_and_type(raw("DISPATCH_REGIONSUM").iloc[0:0], REGIONSUM)
     good, bad = validate(typed, REGIONSUM)
     assert good.empty and bad.empty
+
+
+def test_price_keeps_sa_only():
+    typed, rejects = select_and_type(raw("DISPATCH_PRICE"), PRICE)
+    assert rejects.empty
+    assert set(typed["REGIONID"]) == {"SA1"}
+    assert typed["RRP"].tolist() == [85.0, 85.0]
+    good, bad = validate(typed, PRICE)
+    assert len(good) == 2 and bad.empty
+
+
+def test_price_at_floor_passes_and_beyond_cap_is_rejected():
+    typed, _ = select_and_type(raw("DISPATCH_PRICE", price=-1000), PRICE)
+    assert validate(typed, PRICE)[1].empty
+    typed, _ = select_and_type(raw("DISPATCH_PRICE", price=99999), PRICE)
+    good, bad = validate(typed, PRICE)
+    assert good.empty and bad["REASON"].str.contains("RRP").all()
+
+
+def test_cli_dataset_choices_match_datasets():
+    from sagrid.cli import build_parser
+    from sagrid.schemas import DATASETS
+
+    action = next(
+        a
+        for a in build_parser()._subparsers._group_actions[0].choices["ingest"]._actions
+        if a.dest == "datasets"
+    )
+    assert set(action.choices) == set(DATASETS)

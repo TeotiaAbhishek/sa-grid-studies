@@ -132,6 +132,44 @@ CONSTRAINT = Dataset(
     ),
 )
 
+# Market price floor is -$1,000/MWh; the cap is $20,300/MWh for 2025-26 and
+# rises each July. 25,000 leaves room for the next few years of cap increases
+# while still catching a mis-scaled or mis-parsed price (see docs/decisions.md).
+PRICE_MIN, PRICE_MAX = -1000.0, 25000.0
+
+PRICE = Dataset(
+    name="price",
+    source_table="DISPATCH_PRICE",
+    report="dispatchis",
+    columns={
+        "SETTLEMENTDATE": "datetime",
+        "REGIONID": "str",
+        "INTERVENTION": "int",
+        "RRP": "float",
+        "ROP": "float",
+        "APCFLAG": "int",
+        "MARKETSUSPENDEDFLAG": "int",
+        "RAISEREGRRP": "float",
+        "LOWERREGRRP": "float",
+    },
+    key=("SETTLEMENTDATE", "REGIONID"),
+    row_filter={"REGIONID": (SA_REGION,), "INTERVENTION": ("0",)},
+    schema=pa.DataFrameSchema(
+        {
+            "SETTLEMENTDATE": TS,
+            "REGIONID": pa.Column(str, pa.Check.isin([SA_REGION])),
+            "INTERVENTION": pa.Column(int, pa.Check.isin([0])),
+            "RRP": _num(PRICE_MIN, PRICE_MAX),
+            "ROP": _num(PRICE_MIN, PRICE_MAX, nullable=True),
+            "APCFLAG": pa.Column(int, pa.Check.ge(0)),  # administered price cap flag
+            "MARKETSUSPENDEDFLAG": pa.Column(int, pa.Check.isin([0, 1])),
+            "RAISEREGRRP": _num(0, PRICE_MAX, nullable=True),
+            "LOWERREGRRP": _num(0, PRICE_MAX, nullable=True),
+        },
+        unique=["SETTLEMENTDATE", "REGIONID"],
+    ),
+)
+
 UNIT_SCADA = Dataset(
     name="unit_scada",
     source_table="DISPATCH_UNIT_SCADA",
@@ -148,7 +186,7 @@ UNIT_SCADA = Dataset(
     ),
 )
 
-DATASETS = {d.name: d for d in (REGIONSUM, INTERCONNECTOR, CONSTRAINT, UNIT_SCADA)}
+DATASETS = {d.name: d for d in (REGIONSUM, PRICE, INTERCONNECTOR, CONSTRAINT, UNIT_SCADA)}
 
 
 def select_and_type(raw: pd.DataFrame, ds: Dataset) -> tuple[pd.DataFrame, pd.DataFrame]:
