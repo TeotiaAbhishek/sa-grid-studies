@@ -18,7 +18,8 @@ from sagrid.store import Store
 REGIONSUM_COLS = (
     "SETTLEMENTDATE,RUNNO,REGIONID,DISPATCHINTERVAL,INTERVENTION,TOTALDEMAND,"
     "DEMAND_AND_NONSCHEDGEN,DISPATCHABLEGENERATION,DISPATCHABLELOAD,"
-    "NETINTERCHANGE,TOTALINTERMITTENTGENERATION"
+    "NETINTERCHANGE,TOTALINTERMITTENTGENERATION,SS_WIND_CLEAREDMW,SS_SOLAR_CLEAREDMW,"
+    "SS_WIND_UIGF,SS_SOLAR_UIGF,BDU_CLEAREDMW_GEN,BDU_CLEAREDMW_LOAD"
 )
 PRICE_COLS = (
     "SETTLEMENTDATE,RUNNO,REGIONID,DISPATCHINTERVAL,INTERVENTION,RRP,EEP,ROP,APCFLAG,"
@@ -51,8 +52,12 @@ def dispatchis_csv(
     for i in range(n):
         t = ts(start + timedelta(minutes=5 * i))
         # gen 1300 - load 0 - netinterchange(-200, i.e. importing 200) = demand 1500
-        lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,SA1,1,0,{demand},1550,1300,0,-200,600")
-        lines.append(f"D,DISPATCH,REGIONSUM,9,{t},1,VIC1,1,0,5000,5100,5200,0,200,900")
+        lines.append(
+            f"D,DISPATCH,REGIONSUM,9,{t},1,SA1,1,0,{demand},1550,1300,0,-200,0,350,250,400,300,20,0"
+        )
+        lines.append(
+            f"D,DISPATCH,REGIONSUM,9,{t},1,VIC1,1,0,5000,5100,5200,0,200,0,900,100,950,100,0,0"
+        )
     lines.append("I,DISPATCH,PRICE,5," + PRICE_COLS)
     for i in range(n):
         t = ts(start + timedelta(minutes=5 * i))
