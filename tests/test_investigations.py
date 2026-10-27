@@ -398,14 +398,32 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
     held = np.full(len(t), 40.0)
     tripped = np.full(len(t), 100.0)
     tripped[800:806] = 0.0
+    # GASH is 40 MW off target either side of one on-target reading: that reading is not a spike.
+    gas_h = np.full(len(t), 70.0)
+    gas_h[[300, 302]] = 110.0
+    # SOLH, a semi-scheduled solar farm, dips 40 MW below its forecast for one interval.
+    sol_h = np.full(len(t), 80.0)
+    sol_h[600] = 40.0
     extra = pd.concat(
         [
             pd.DataFrame({"SETTLEMENTDATE": t, "DUID": d, "SCADAVALUE": v})
-            for d, v in (("BATTE", batt), ("GASF", held), ("GASG", tripped))
+            for d, v in (
+                ("BATTE", batt),
+                ("GASF", held),
+                ("GASG", tripped),
+                ("GASH", gas_h),
+                ("SOLH", sol_h),
+            )
         ]
     )
     week.upsert(DATASETS["unit_scada"], extra)
-    clean |= {"BATTE": batt, "GASF": held, "GASG": np.full(len(t), 100.0)}
+    clean |= {
+        "BATTE": batt,
+        "GASF": held,
+        "GASG": np.full(len(t), 100.0),
+        "GASH": np.full(len(t), 70.0),
+        "SOLH": np.full(len(t), 80.0),
+    }
     sol = pd.concat(
         [
             pd.DataFrame(
@@ -429,12 +447,13 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
             REGISTRY,
             pd.DataFrame(
                 {
-                    "DUID": ["BATTE", "GASF", "GASG"],
+                    "DUID": ["BATTE", "GASF", "GASG", "GASH", "SOLH"],
                     "REGIONID": "SA1",
-                    "STATION": ["Battery E", "Gas F", "Gas G"],
-                    "DISPATCHTYPE": ["BIDIRECTIONAL", "GENERATOR", "GENERATOR"],
-                    "FUEL": ["Battery", "Gas", "Gas"],
-                    "REG_CAP_MW": [60.0, 50.0, 120.0],
+                    "STATION": ["Battery E", "Gas F", "Gas G", "Gas H", "Solar H"],
+                    "DISPATCHTYPE": ["BIDIRECTIONAL"] + ["GENERATOR"] * 4,
+                    "SCHEDULE_TYPE": ["SCHEDULED"] * 4 + ["SEMI-SCHEDULED"],
+                    "FUEL": ["Battery", "Gas", "Gas", "Gas", "Solar"],
+                    "REG_CAP_MW": [60.0, 50.0, 120.0, 150.0, 100.0],
                 }
             ),
         ]
@@ -445,6 +464,10 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
     found = {(r.DUID, r.ISSUE) for r in reg.itertuples()}
     assert {("WINDA", "spike"), ("WINDA", "stuck"), ("GASG", "no_response")} <= found
     assert "BATTE" not in set(reg["DUID"])  # swings follow dispatch: not spikes
+    gas_h = reg[reg["DUID"] == "GASH"]
+    assert set(gas_h["ISSUE"]) <= {"spike"} and len(gas_h) <= 2  # never the on-target reading
+    assert t.iloc[301] not in set(gas_h["FIRST"])
+    assert set(reg.loc[reg["DUID"] == "SOLH", "ISSUE"]) == {"brief_departure"}
     assert ("GASF", "stuck") not in found  # constant target: a setpoint, not frozen telemetry
     assert rep.numbers["targets_used"] and rep.numbers["stuck_at_setpoint"] >= 1
     stuck = reg[(reg["DUID"] == "WINDA") & (reg["ISSUE"] == "stuck")]["EVIDENCE"].iloc[0]

@@ -49,3 +49,19 @@ def test_missing_footer_still_parses(caplog):
 def test_garbage_raises():
     with pytest.raises(ParseError):
         parse_aemo_csv("this is not an aemo file\n")
+
+
+def test_keep_limits_columns_but_still_checks_row_length():
+    text = (
+        "C,NEMP.WORLD,X,AEMO,PUBLIC,2026/10/01,00:00:00,1,X,1\n"
+        "I,DISPATCH,UNIT_SOLUTION,6,SETTLEMENTDATE,DUID,A,B,TOTALCLEARED\n"
+        'D,DISPATCH,UNIT_SOLUTION,6,"2026/10/01 00:05:00",HPR1,1,2,-59\n'
+        'D,DISPATCH,UNIT_SOLUTION,6,"2026/10/01 00:05:00",HPR2,1,-59\n'
+        'C,"END OF REPORT",5\n'
+    )
+    keep = {"DISPATCH_UNIT_SOLUTION": {"SETTLEMENTDATE", "DUID", "TOTALCLEARED"}}
+    p = parse_aemo_csv(text, keep=keep)
+    df = p.tables["DISPATCH_UNIT_SOLUTION"]
+    assert list(df.columns) == ["SETTLEMENTDATE", "DUID", "TOTALCLEARED"]
+    assert df["TOTALCLEARED"].tolist() == ["-59"]
+    assert len(p.bad_rows) == 1  # the short row is caught against the full header

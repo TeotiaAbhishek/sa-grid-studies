@@ -47,6 +47,9 @@ RESPONSES = {
     "registry (storage or load) before treating it as a fault.",
     "missing": "Unit stopped reporting for part of the window. Check for decommissioning, a "
     "registry change or a dropped feed.",
+    "brief_departure": "A semi-scheduled unit left its forecast-based target for one interval "
+    "and came back. Usually weather (a passing cloud or a gust); treat as a telemetry glitch "
+    "only if it recurs at the same size or direction.",
     "no_response": "Reading stayed at zero while dispatch expected output. Either the unit "
     "tripped or its telemetry dropped to zero; check the unit's availability and AEMO market "
     "notices, then raise it with the participant.",
@@ -58,6 +61,7 @@ SEVERITY = {
     "spike": "medium",
     "negative": "low",
     "no_response": "high",
+    "brief_departure": "low",
 }
 
 
@@ -74,15 +78,17 @@ def find_stuck(s: pd.Series, min_len: int = STUCK_MIN_INTERVALS) -> pd.DataFrame
     return r[r["length"] >= min_len].reset_index(drop=True)
 
 
-def find_spikes(s: pd.Series, capacity: float | None) -> pd.Series:
+def find_spikes(s: pd.Series, capacity: float | None, baseline: float | None = None) -> pd.Series:
     """Boolean mask of single-interval excursions that revert.
 
     A reading is a spike when it is far from the average of its two
     neighbours while the neighbours agree with each other. The scale is the
     unit's median absolute deviation of that gap, so a noisy wind farm needs
     a bigger jump to be flagged than a steady gas unit. Given the gap between
-    readings and dispatch targets instead of raw readings, it finds jumps
-    that the targets do not explain.
+    readings and dispatch targets instead of raw readings (with `baseline`
+    0), it finds jumps that the targets do not explain, and the reading must
+    itself be off target by the threshold: a reading that matches its target
+    between two that do not is the one that is right.
     """
     v = s.astype(float)
     before, after = v.shift(1), v.shift(-1)
@@ -91,7 +97,8 @@ def find_spikes(s: pd.Series, capacity: float | None) -> pd.Series:
     floor = max(SPIKE_MIN_MW, 0.1 * capacity) if capacity and capacity > 0 else SPIKE_MIN_MW
     threshold = max(SPIKE_ROBUST_Z * mad, floor)
     reverts = (before - after).abs() < threshold / 2
-    return (resid.abs() > threshold) & reverts
+    off = (v - baseline).abs() > threshold if baseline is not None else True
+    return (resid.abs() > threshold) & reverts & off
 
 
 def change_points(
@@ -156,6 +163,7 @@ def screen_units(
         units.set_index("DUID")["REG_CAP_MW"] if "REG_CAP_MW" in units else pd.Series(dtype=float)
     )
     types = units.set_index("DUID")["DISPATCHTYPE"]
+    schedule = units.set_index("DUID")["SCHEDULE_TYPE"] if "SCHEDULE_TYPE" in units else pd.Series()
     by_unit = (
         {d: g.set_index("SETTLEMENTDATE")["TOTALCLEARED"] for d, g in targets.groupby("DUID")}
         if targets is not None
@@ -208,12 +216,15 @@ def screen_units(
 
         if tgt is not None:
             gap = pd.Series(end - tgt.to_numpy(), index=grid + SCADA_LAG).dropna()
-            for t in gap[find_spikes(gap, cap)].index:
+            # A semi-scheduled target is a forecast, so one interval away from it is
+            # usually weather (a passing cloud or a gust), not telemetry.
+            kind = "brief_departure" if schedule.get(duid) == "SEMI-SCHEDULED" else "spike"
+            for t in gap[find_spikes(gap, cap, baseline=0.0)].index:
                 before, after = gap.shift(1).get(t, np.nan), gap.shift(-1).get(t, np.nan)
                 issues.append(
                     _issue(
                         duid,
-                        "spike",
+                        kind,
                         t,
                         t,
                         1,
@@ -464,8 +475,11 @@ def _markdown(nb, issues, summary, seg_df) -> str:
         "of capacity) away from the average of its two neighbours, where the neighbours agree "
         "with each other. "
         + (
-            "This is applied to each reading's gap from its dispatch target, so fast moves that "
-            "follow dispatch (a battery switching from charging to discharging) are not flagged."
+            "This is applied to each reading's gap from its dispatch target, and the reading "
+            "itself must be off target by that much, so fast moves that follow dispatch (a "
+            "battery switching from charging to discharging) are not flagged. For semi-scheduled "
+            "wind and solar farms the target is a forecast, so the same pattern is listed as a "
+            "low-severity **brief departure**, which is usually weather."
             if nb["targets_used"]
             else "Without dispatch targets, fast moves that follow dispatch can be flagged too."
         ),

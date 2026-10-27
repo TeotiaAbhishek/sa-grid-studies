@@ -53,7 +53,7 @@ def date_range(start: date, end: date) -> list[date]:
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
 
-FLUSH_BYTES = 200 * 1024 * 1024  # bound memory on large archives (a month of unit targets)
+FLUSH_BYTES = 50 * 1024 * 1024  # bound memory on large archives (about one day of unit targets)
 
 
 def load_texts(
@@ -67,6 +67,9 @@ def load_texts(
     replaced, because this load replaces its rows.
     """
     wanted = {d.source_table for d in datasets}
+    keep: dict[str, set[str]] = {}
+    for d in datasets:
+        keep.setdefault(d.source_table, set()).update(d.columns)
     rows: dict[str, int] = {}
     rejects: dict[str, int] = {}
     for name in ["_malformed", *(d.name for d in datasets)]:
@@ -98,7 +101,7 @@ def load_texts(
 
     size = 0
     for member, text in texts:
-        parsed = parse_aemo_csv(text, wanted=wanted)
+        parsed = parse_aemo_csv(text, wanted=wanted, keep=keep)
         malformed.extend((member, n, r) for n, r in parsed.bad_rows)
         for name, df in parsed.tables.items():
             collected.setdefault(name, []).append(df)
