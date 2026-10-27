@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -43,8 +44,8 @@ def _coerce(name: str, value, target):
         raise ConfigError(f"setting {name!r} has invalid value {value!r}") from exc
 
 
-def load_settings(path: Path | None = None, env: dict | None = None) -> Settings:
-    env = os.environ if env is None else env
+def load_settings(path: Path | None = None, env: Mapping[str, str] | None = None) -> Settings:
+    environ: Mapping[str, str] = os.environ if env is None else env
     raw: dict = {}
     if path is not None:
         if not Path(path).exists():
@@ -57,8 +58,8 @@ def load_settings(path: Path | None = None, env: dict | None = None) -> Settings
         raise ConfigError(f"unknown settings in {path}: {sorted(unknown)}")
     for name in known:
         key = f"SAGRID_{name.upper()}"
-        if key in env:
-            raw[name] = env[key]
+        if key in environ:
+            raw[name] = environ[key]
     values = {k: _coerce(k, v, known[k]) for k, v in raw.items()}
     s = Settings(**values)
     if s.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:

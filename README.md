@@ -55,6 +55,12 @@ On macOS or Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
 
 Dates are `YYYY-MM-DD` or `yesterday`. Exit codes: 0 ok, 1 checks failed, 2 a file failed, 3 bad input or config.
 
+## Running it unattended
+
+- **Nightly job:** `.github/workflows/nightly.yml` ingests the previous day at 01:30 AEST, runs `sagrid check`, keeps the database between runs, and uploads logs. If ingest or any check fails, it opens (or comments on) a GitHub issue labelled `alert`. It can also be started by hand from the Actions tab with a date range, which doubles as a backfill.
+- **Docker:** `docker build -t sagrid .` then `docker run --rm -v ${PWD}/data:/home/sagrid/data sagrid ingest --start yesterday --end yesterday`. The image runs as a non-root user.
+- **Releases:** pushing a tag such as `v0.1.0` runs the tests, builds the package and Docker image, pushes the image to GitHub Container Registry and creates a GitHub release.
+
 ## Configuration
 
 Copy `sagrid.example.toml` to `sagrid.toml`, or set `SAGRID_*` environment variables. Settings are validated at start-up and an unknown or invalid setting stops the run with a clear message.

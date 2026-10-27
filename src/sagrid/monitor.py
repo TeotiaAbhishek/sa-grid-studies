@@ -46,7 +46,7 @@ def run_checks(
         ],
     ).df()
 
-    latest = store.con.execute("SELECT max(SETTLEMENTDATE) FROM region_summary").fetchone()[0]
+    latest = store.scalar("SELECT max(SETTLEMENTDATE) FROM region_summary")
     now_utc = now_utc or datetime.now(UTC).replace(tzinfo=None)
     now_market = now_utc + NEM_UTC_OFFSET
     age_h = (now_market - latest).total_seconds() / 3600 if latest else float("inf")
@@ -69,7 +69,7 @@ def run_checks(
     )
 
     loaded = sum(store.count(t) for t in tables if t not in {"rejects", "runs", "loaded_files"})
-    rejected = store.con.execute("SELECT count(*) FROM rejects").fetchone()[0]
+    rejected = store.count("rejects")
     rate = rejected / (loaded + rejected) if (loaded + rejected) else 0.0
     checks.append(
         Check(

@@ -17,8 +17,8 @@ jobs:
         python: ["3.11", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -28,16 +28,29 @@ jobs:
         run: ruff check src tests
       - name: Format
         run: ruff format --check src tests
+      - name: Type check
+        run: mypy src
       - name: Tests with coverage (parser and validation must stay at or above 85%)
         run: pytest --cov=sagrid --cov-report=term-missing --cov-fail-under=85
 
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - name: Dependency vulnerability scan
         run: pip-audit --skip-editable
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t sagrid:ci .
+      - name: Smoke test
+        run: |
+          docker run --rm sagrid:ci --help
+          docker run --rm sagrid:ci status
