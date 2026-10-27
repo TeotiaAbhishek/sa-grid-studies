@@ -231,11 +231,15 @@ def screen_units(
             in_episode = pd.Series(False, index=gap.index)
             if not semi:
                 for sign in (1, -1):
-                    away = (sign * gap > limit).fillna(False)
-                    for _, r in runs(away).iterrows():
-                        if int(r["length"]) < OFF_TARGET_MIN_INTERVALS:
-                            continue
+                    off = (sign * gap > limit).fillna(False)
+                    # one reading back inside the limit does not end an episode
+                    joined = off | (
+                        off.shift(1, fill_value=False) & off.shift(-1, fill_value=False)
+                    )
+                    for _, r in runs(joined).iterrows():
                         span = gap.index[int(r["start"]) : int(r["start"]) + int(r["length"])]
+                        if off[span].sum() < OFF_TARGET_MIN_INTERVALS:
+                            continue
                         in_episode[span] = True
                         target = tgt[span - SCADA_LAG].mean()
                         issues.append(
@@ -588,7 +592,8 @@ def _markdown(nb, issues, summary, seg_df) -> str:
             "from one whose telemetry dropped, so offline-but-reporting is not tested."
         ),
         "- Some flags can be real behaviour: a wind farm in calm air or a unit on a ramp can "
-        "still look odd. Each flag is a lead to check, not a verdict.",
+        "still look odd, and a battery delivering frequency control (FCAS) moves away from its "
+        "energy target by design. Each flag is a lead to check, not a verdict.",
         "- The registry is a snapshot. Units upgraded since it was published can look over "
         "capacity.",
         "",

@@ -404,9 +404,10 @@ def test_i3_with_dispatch_targets_separates_faults_from_normal_moves(week):
     # SOLH, a semi-scheduled solar farm, dips 40 MW below its forecast for one interval.
     sol_h = np.full(len(t), 80.0)
     sol_h[600] = 40.0
-    # BATTK is told to charge at -100 MW for 30 minutes but swings between -10 and -40.
+    # BATTK is told to charge at -100 MW for 30 minutes but swings between -10 and -40,
+    # with one reading (-90) briefly back near target that must not split the episode.
     batt_k = np.zeros(len(t))
-    batt_k[900:906] = [-10.0, -40.0, -10.0, -40.0, -10.0, -40.0]
+    batt_k[900:906] = [-10.0, -40.0, -90.0, -40.0, -10.0, -40.0]
     batt_k_target = np.zeros(len(t))
     batt_k_target[900:906] = -100.0
     # BATTM, not offered to the market, reads 119 MW for one sample.

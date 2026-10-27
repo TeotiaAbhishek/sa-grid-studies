@@ -256,4 +256,6 @@ def iter_csv_texts(zip_bytes: bytes, depth: int = 0):
             if lower.endswith(".zip"):
                 yield from iter_csv_texts(data, depth + 1)
             elif lower.endswith(".csv"):
-                yield info.filename, data.decode("utf-8", errors="replace")
+                text = data.decode("utf-8", errors="replace")
+                del data  # a day of unit targets is ~120 MB; don't hold it twice
+                yield info.filename, text
