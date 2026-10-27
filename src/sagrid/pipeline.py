@@ -53,42 +53,60 @@ def date_range(start: date, end: date) -> list[date]:
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
 
+FLUSH_BYTES = 200 * 1024 * 1024  # bound memory on large archives (a month of unit targets)
+
+
 def load_texts(
     texts, datasets: list[Dataset], store: Store, run_id: str, source: str
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Parse CSV documents and load every dataset they contain.
 
     A daily archive holds 288 five-minute files, so tables are collected
-    across all of them first and typed, validated and stored in one batch.
+    across them and typed, validated and stored in batches of about
+    FLUSH_BYTES of CSV text. Earlier rejects from the same source file are
+    replaced, because this load replaces its rows.
     """
     wanted = {d.source_table for d in datasets}
-    collected: dict[str, list[pd.DataFrame]] = {}
-    malformed: list[tuple[str, int, str]] = []
-    for member, text in texts:
-        parsed = parse_aemo_csv(text, wanted=wanted)
-        malformed += [(member, n, r) for n, r in parsed.bad_rows]
-        for name, df in parsed.tables.items():
-            collected.setdefault(name, []).append(df)
-
     rows: dict[str, int] = {}
     rejects: dict[str, int] = {}
-    store.clear_rejects("_malformed", source)
-    if malformed:
-        bad = pd.DataFrame(malformed, columns=["member", "line", "REASON"])
-        rejects["_malformed"] = store.add_rejects(run_id, "_malformed", source, bad)
-    for ds in datasets:
-        frames = collected.get(ds.source_table)
-        if not frames:
-            continue
-        raw = pd.concat(frames, ignore_index=True)
-        typed, bad_types = select_and_type(raw, ds)
-        typed = typed.drop_duplicates()  # identical repeats are harmless; conflicts are not
-        good, bad_checks = validate(typed, ds)
-        rows[ds.name] = store.upsert(ds, good)
-        store.clear_rejects(ds.name, source)
-        rejects[ds.name] = store.add_rejects(
-            run_id, ds.name, source, bad_types
-        ) + store.add_rejects(run_id, ds.name, source, bad_checks)
+    for name in ["_malformed", *(d.name for d in datasets)]:
+        store.clear_rejects(name, source)
+
+    collected: dict[str, list[pd.DataFrame]] = {}
+    malformed: list[tuple[str, int, str]] = []
+
+    def flush() -> None:
+        if malformed:
+            bad = pd.DataFrame(malformed, columns=["member", "line", "REASON"])
+            n = store.add_rejects(run_id, "_malformed", source, bad)
+            rejects["_malformed"] = rejects.get("_malformed", 0) + n
+        for ds in datasets:
+            frames = collected.get(ds.source_table)
+            if not frames:
+                continue
+            raw = pd.concat(frames, ignore_index=True)
+            typed, bad_types = select_and_type(raw, ds)
+            typed = typed.drop_duplicates()  # identical repeats are harmless; conflicts are not
+            good, bad_checks = validate(typed, ds)
+            rows[ds.name] = rows.get(ds.name, 0) + store.upsert(ds, good)
+            n = store.add_rejects(run_id, ds.name, source, bad_types) + store.add_rejects(
+                run_id, ds.name, source, bad_checks
+            )
+            rejects[ds.name] = rejects.get(ds.name, 0) + n
+        collected.clear()
+        malformed.clear()
+
+    size = 0
+    for member, text in texts:
+        parsed = parse_aemo_csv(text, wanted=wanted)
+        malformed.extend((member, n, r) for n, r in parsed.bad_rows)
+        for name, df in parsed.tables.items():
+            collected.setdefault(name, []).append(df)
+        size += len(text)
+        if size >= FLUSH_BYTES:
+            flush()
+            size = 0
+    flush()
     return rows, rejects
 
 

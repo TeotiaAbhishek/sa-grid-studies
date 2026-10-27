@@ -148,3 +148,16 @@ def test_reload_replaces_a_files_old_rejects(store):
     load_texts([("a.CSV", good)], price, store, "r2", "A.zip")  # A fixed upstream, reloaded
     left = store.con.execute("SELECT source_file, count(*) FROM rejects GROUP BY 1").fetchall()
     assert left == [("B.zip", 1)]
+
+
+def test_loading_in_small_batches_gives_the_same_tables(store, tmp_path, monkeypatch):
+    import sagrid.pipeline as pipeline
+    from sagrid.store import Store
+
+    run_ingest(START, START, store, FakeClient(tmp_path))
+    other = Store(":memory:")
+    monkeypatch.setattr(pipeline, "FLUSH_BYTES", 10_000)  # flush every few 5-minute files
+    run_ingest(START, START, other, FakeClient(tmp_path))
+    for t in ("region_summary", "price", "unit_scada", "rooftop_pv", "unit_solution"):
+        assert other.table_hash(t) == store.table_hash(t), t
+    other.close()
