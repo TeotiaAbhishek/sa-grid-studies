@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument(
                 "--datasets",
                 nargs="+",
-                choices=["region_summary", "interconnector", "constraint", "unit_scada"],
+                choices=["region_summary", "price", "interconnector", "constraint", "unit_scada"],
             )
         if name == "check":
             sp.add_argument("--json", action="store_true", help="print results as JSON")

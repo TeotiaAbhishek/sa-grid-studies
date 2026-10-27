@@ -7,7 +7,7 @@
 3. Load a week: `sagrid ingest --start 2026-10-19 --end 2026-10-25`.
 4. Check it: `sagrid check --start 2026-10-19 --end 2026-10-25`.
 
-A week of the four datasets takes a few minutes and a few hundred MB of downloads. Unit SCADA is the largest; leave it out with `--datasets region_summary interconnector constraint` if you only need the region view.
+A week of the five datasets takes a few minutes and a few hundred MB of downloads. Unit SCADA is the largest; leave it out with `--datasets region_summary price interconnector constraint` if you only need the region view.
 
 ## Reading the output
 
@@ -42,3 +42,13 @@ import duckdb
 con = duckdb.connect("data/sagrid.duckdb", read_only=True)
 con.sql("SELECT date_trunc('day', SETTLEMENTDATE) d, min(TOTALDEMAND), max(TOTALDEMAND) FROM region_summary GROUP BY 1 ORDER BY 1").show()
 ```
+
+## Adding a dataset to data you already loaded
+
+`sagrid ingest` skips archives it has already loaded, so a dataset added in a new release (for example `price`) is not filled in for past days automatically. Re-read the cached archives with:
+
+```powershell
+sagrid backfill --start 2026-10-19 --end 2026-10-25 --datasets price
+```
+
+Archives come from the local cache, so this is quick and downloads nothing that is already there.

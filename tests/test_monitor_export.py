@@ -44,6 +44,7 @@ def test_export_writes_star_schema(store, tmp_path):
     names = {p.name for p in paths}
     for n in (
         "fact_region_summary",
+        "fact_price",
         "fact_interconnector",
         "fact_constraint",
         "dim_date",

@@ -46,6 +46,7 @@ def test_full_week_loads_2016_sa_intervals(store, tmp_path):
     assert m["totals"]["files_failed"] == 0
     n = store.con.execute("SELECT count(*) FROM region_summary").fetchone()[0]
     assert n == 7 * 288 == 2016
+    assert store.count("price") == 2016
     assert store.con.execute("SELECT count(*) FROM interconnector").fetchone()[0] == 2 * 2016
     assert store.con.execute("SELECT count(*) FROM unit_scada").fetchone()[0] == 2 * 2016
 
@@ -53,7 +54,9 @@ def test_full_week_loads_2016_sa_intervals(store, tmp_path):
 def test_rerun_is_idempotent(store, tmp_path):
     client = FakeClient(tmp_path)
     run_ingest(START, START, store, client)
-    before = {t: store.table_hash(t) for t in ("region_summary", "interconnector", "constraint")}
+    before = {
+        t: store.table_hash(t) for t in ("region_summary", "price", "interconnector", "constraint")
+    }
     m2 = run_ingest(START, START, store, client)
     assert m2["totals"]["files_skipped"] == 2 and m2["totals"]["files_loaded"] == 0
     m3 = run_ingest(START, START, store, client, force=True)  # backfill

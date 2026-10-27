@@ -12,6 +12,7 @@ def test_parses_every_table():
     p = parse_aemo_csv(dispatchis_csv(T0, n=3))
     assert set(p.tables) == {
         "DISPATCH_REGIONSUM",
+        "DISPATCH_PRICE",
         "DISPATCH_INTERCONNECTORRES",
         "DISPATCH_CONSTRAINT",
     }
