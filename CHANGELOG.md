@@ -18,6 +18,7 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 - Dockerfile (non-root) with a CI smoke test, and a tag-driven release workflow.
 - Live-data integration test (`pytest -m network`).
 - `sagrid investigate`: investigations I1 (binding constraints and their drivers), I2 (Heywood at its limit) and I3 (SCADA data quality, with an issues register), each writing a reproducible report with a data snapshot hash.
+- Region summary now carries wind and solar farm output (dispatched and forecast) and battery charge and discharge; older files without these columns still load, and existing databases gain the columns automatically.
 
 ## [0.0.1] - 2026-10-27
 ### Added

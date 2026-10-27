@@ -81,3 +81,21 @@ def test_export_dates_interval_start_tables_by_their_start(store, tmp_path):
     assert fact["DATE"].tolist() == [pd.Timestamp("2026-09-30"), pd.Timestamp("2026-10-01")]
     dates = pd.read_parquet(tmp_path / "dim_date.parquet")["DATE"].tolist()
     assert dates == [pd.Timestamp("2026-09-30"), pd.Timestamp("2026-10-01")]
+
+
+def test_store_adds_columns_new_releases_introduce(store):
+    from sagrid.schemas import REGIONSUM
+
+    # A table as an older release created it, without the semi-scheduled columns.
+    old_cols = {c: t for c, t in REGIONSUM.columns.items() if c not in REGIONSUM.optional}
+    store.con.execute(
+        "CREATE TABLE region_summary ("
+        + ", ".join(
+            f'"{c}" {"TIMESTAMP" if t == "datetime" else "VARCHAR" if t == "str" else "DOUBLE"}'
+            for c, t in old_cols.items()
+        )
+        + ', PRIMARY KEY ("SETTLEMENTDATE", "REGIONID"))'
+    )
+    load_day(store, n=3)
+    df = store.table("region_summary")
+    assert df["SS_WIND_CLEAREDMW"].tolist() == [350.0] * 3

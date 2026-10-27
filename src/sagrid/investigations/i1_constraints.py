@@ -52,7 +52,8 @@ TABLES = ("region_summary", "price", "interconnector", "constraint", "rooftop_pv
 
 FEATURES = [
     "TOTALDEMAND",
-    "TOTALINTERMITTENTGENERATION",
+    "SS_WIND_CLEAREDMW",
+    "SS_SOLAR_CLEAREDMW",
     "ROOFTOP_PV",
     "HEYWOOD_FLOW",
     "MURRAYLINK_FLOW",
@@ -61,7 +62,8 @@ FEATURES = [
 ]
 FEATURE_LABELS = {
     "TOTALDEMAND": "SA demand",
-    "TOTALINTERMITTENTGENERATION": "Wind and solar farm output",
+    "SS_WIND_CLEAREDMW": "Wind farm output",
+    "SS_SOLAR_CLEAREDMW": "Solar farm output",
     "ROOFTOP_PV": "Rooftop PV",
     "HEYWOOD_FLOW": "Heywood flow into SA",
     "MURRAYLINK_FLOW": "Murraylink flow into SA",

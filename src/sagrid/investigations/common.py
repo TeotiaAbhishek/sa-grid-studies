@@ -98,15 +98,22 @@ def interval_frame(store: Store, w: Window) -> pd.DataFrame:
     rs = read_window(store, "region_summary", w)
     if rs.empty:
         raise ValueError(f"no region_summary rows for {w.start} to {w.end}; run sagrid ingest")
-    df = rs[
-        [
-            "SETTLEMENTDATE",
-            "TOTALDEMAND",
-            "DISPATCHABLEGENERATION",
-            "NETINTERCHANGE",
-            "TOTALINTERMITTENTGENERATION",
-        ]
-    ].copy()
+    wanted = [
+        "SETTLEMENTDATE",
+        "TOTALDEMAND",
+        "DISPATCHABLEGENERATION",
+        "NETINTERCHANGE",
+        "SS_WIND_CLEAREDMW",
+        "SS_SOLAR_CLEAREDMW",
+        "SS_WIND_UIGF",
+        "SS_SOLAR_UIGF",
+    ]
+    df = rs[[c for c in wanted if c in rs]].copy()
+    if {"SS_WIND_UIGF", "SS_WIND_CLEAREDMW", "SS_SOLAR_UIGF", "SS_SOLAR_CLEAREDMW"} <= set(df):
+        # Output the wind and solar farms could have produced but were not dispatched for.
+        df["CURTAILMENT"] = (df["SS_WIND_UIGF"] - df["SS_WIND_CLEAREDMW"]).clip(lower=0) + (
+            df["SS_SOLAR_UIGF"] - df["SS_SOLAR_CLEAREDMW"]
+        ).clip(lower=0)
     present = tables_in(store)
     if "price" in present:
         price = read_window(store, "price", w)[["SETTLEMENTDATE", "RRP"]]

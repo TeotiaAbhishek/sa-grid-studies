@@ -103,3 +103,19 @@ def test_cli_dataset_choices_match_datasets():
         if a.dest == "datasets"
     )
     assert set(action.choices) == set(DATASETS)
+
+
+def test_semischeduled_columns_are_loaded():
+    typed, _ = select_and_type(raw("DISPATCH_REGIONSUM"), REGIONSUM)
+    row = typed.iloc[0]
+    assert (row["SS_WIND_CLEAREDMW"], row["SS_SOLAR_CLEAREDMW"]) == (350.0, 250.0)
+    assert (row["SS_WIND_UIGF"], row["SS_SOLAR_UIGF"]) == (400.0, 300.0)
+
+
+def test_older_files_without_optional_columns_still_load():
+    old = raw("DISPATCH_REGIONSUM").drop(columns=list(REGIONSUM.optional))
+    typed, rejects = select_and_type(old, REGIONSUM)
+    assert rejects.empty and len(typed) == 2
+    assert typed["SS_WIND_CLEAREDMW"].isna().all()
+    good, bad = validate(typed, REGIONSUM)
+    assert len(good) == 2 and bad.empty

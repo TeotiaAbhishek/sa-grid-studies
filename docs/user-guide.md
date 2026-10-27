@@ -47,7 +47,7 @@ con.sql("SELECT date_trunc('day', SETTLEMENTDATE) d, min(TOTALDEMAND), max(TOTAL
 
 ## Adding a dataset to data you already loaded
 
-`sagrid ingest` skips archives it has already loaded, so a dataset added in a new release (for example `price`) is not filled in for past days automatically. Re-read the cached archives with:
+`sagrid ingest` skips archives it has already loaded, so a dataset or column added in a new release (for example `price`, or the wind and solar columns in `region_summary`) is not filled in for past days automatically. New columns appear empty until you backfill. Re-read the cached archives with:
 
 ```powershell
 sagrid backfill --start 2026-10-19 --end 2026-10-25 --datasets price

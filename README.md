@@ -12,7 +12,7 @@ Built to production standards: tested on Windows and Linux in CI, validated row 
 
 | Dataset | Source table | What it holds |
 | --- | --- | --- |
-| `region_summary` | DISPATCH_REGIONSUM | SA demand, generation, net interchange (5-minute) |
+| `region_summary` | DISPATCH_REGIONSUM | SA demand, generation, net interchange, wind and solar farm output and forecasts, battery charge and discharge (5-minute) |
 | `price` | DISPATCH_PRICE | SA spot price (RRP), price flags and regulation FCAS prices (5-minute) |
 | `interconnector` | DISPATCH_INTERCONNECTORRES | Heywood (V-SA) and Murraylink (V-S-MNSP1) flows and limits |
 | `constraint` | DISPATCH_CONSTRAINT | Network constraints, their marginal values and violations |

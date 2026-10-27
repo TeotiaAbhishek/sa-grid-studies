@@ -30,7 +30,9 @@ from sagrid.store import Store
 TABLES = ("region_summary", "price", "interconnector", "rooftop_pv")
 CONDITIONS = {
     "TOTALDEMAND": "SA demand (MW)",
-    "TOTALINTERMITTENTGENERATION": "Wind and solar farm output (MW)",
+    "SS_WIND_CLEAREDMW": "Wind farm output (MW)",
+    "SS_SOLAR_CLEAREDMW": "Solar farm output (MW)",
+    "CURTAILMENT": "Wind and solar farm curtailment (MW)",
     "ROOFTOP_PV": "Rooftop PV (MW)",
     "RRP": "SA price ($/MWh)",
 }

@@ -57,7 +57,13 @@ def load_synthetic_week(store, seed=1):
                 "DISPATCHABLEGENERATION": gen,
                 "DISPATCHABLELOAD": 0.0,
                 "NETINTERCHANGE": 200.0,
-                "TOTALINTERMITTENTGENERATION": 400 + rng.normal(0, 50, n),
+                "TOTALINTERMITTENTGENERATION": 0.0,
+                "SS_WIND_CLEAREDMW": 400 + rng.normal(0, 50, n),
+                "SS_SOLAR_CLEAREDMW": 0.2 * pv,
+                "SS_WIND_UIGF": 450 + rng.normal(0, 50, n),
+                "SS_SOLAR_UIGF": 0.3 * pv,
+                "BDU_CLEAREDMW_GEN": 0.0,
+                "BDU_CLEAREDMW_LOAD": 0.0,
             }
         ),
     )
