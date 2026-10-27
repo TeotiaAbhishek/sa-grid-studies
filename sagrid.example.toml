@@ -4,7 +4,7 @@
 db_path = "data/sagrid.duckdb"
 cache_dir = "data/cache"
 export_dir = "data/exports"
-# registry_path = "data/NEM Registration and Exemption List.xlsx"
+# registry_path = "data/NEM Registration and Exemption List.xlsx"  # default: data/registry.csv from `sagrid registry`
 log_level = "INFO"
 retries = 4
 backoff_s = 2.0

@@ -35,7 +35,13 @@ Rooftop PV is published half-hourly, and its weekly archive appears about two we
 
 ## Adding the generator registry
 
-Download the "NEM Registration and Exemption List" spreadsheet from AEMO's website, save it under `data/`, and set `registry_path` in `sagrid.toml`. `sagrid export` then adds a `dim_unit` table (region and fuel per unit), and the SCADA reconciliation becomes available.
+```powershell
+sagrid registry                      # or: sagrid registry --on 2026-10-19
+```
+
+This builds `data/registry.csv` (one row per unit: region, dispatch type, station, fuel, registered capacity) from AEMO's monthly MMSDM registration tables on NEMWEB (DUDETAILSUMMARY, DUDETAIL, DUALLOC and GENUNITS), using the rows in force on the given date. MMSDM months appear a few weeks after they end, so the newest available month is used. Once the file exists, `sagrid export` adds a `dim_unit` table and `sagrid investigate i3` can run.
+
+AEMO's "NEM Registration and Exemption List" workbook also works: download it from aemo.com.au and set `registry_path` in `sagrid.toml`. That setting takes priority over `data/registry.csv`.
 
 ## Querying the data directly
 

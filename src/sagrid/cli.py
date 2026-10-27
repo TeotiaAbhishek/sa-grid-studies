@@ -66,6 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     inv.add_argument("--start", type=_date, required=True)
     inv.add_argument("--end", type=_date, required=True)
     inv.add_argument("--out", type=Path, default=Path("docs/investigations"))
+    reg = sub.add_parser("registry", help="build the generator registry from NEMWEB")
+    reg.add_argument(
+        "--on", type=_date, default=None, help="date the registry should describe (default: today)"
+    )
     sub.add_parser("export")
     sub.add_parser("status")
     return p
@@ -75,6 +79,14 @@ def _settings(path: Path | None) -> Settings:
     if path is None and Path("sagrid.toml").exists():
         path = Path("sagrid.toml")
     return load_settings(path)
+
+
+def _registry_file(s: Settings) -> Path | None:
+    """The configured registry, or the one `sagrid registry` built, if any."""
+    if s.registry_path:
+        return s.registry_path
+    built = s.data_dir / "registry.csv"
+    return built if built.exists() else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,12 +142,32 @@ def main(argv: list[str] | None = None) -> int:
             from sagrid.export import export_powerbi
 
             registry = None
-            if s.registry_path:
+            if reg_file := _registry_file(s):
                 from sagrid.registry import load_registry
 
-                registry = load_registry(s.registry_path)
+                registry = load_registry(reg_file)
             paths = export_powerbi(store, s.export_dir, registry)
             print(f"wrote {len(paths)} files to {s.export_dir}")
+            return EXIT_OK
+
+        if args.command == "registry":
+            from sagrid.nemweb.client import NemwebClient
+            from sagrid.registry import RegistryError, fetch_registry
+
+            client = NemwebClient(
+                s.cache_dir, retries=s.retries, backoff=s.backoff_s, timeout=s.timeout_s
+            )
+            on = args.on or datetime.now(UTC).date()
+            try:
+                built, month = fetch_registry(client, on)
+            except RegistryError as exc:
+                print(f"registry: {exc}", file=sys.stderr)
+                return EXIT_RUN_FAILED
+            out = s.data_dir / "registry.csv"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            built.to_csv(out, index=False)
+            counts = built["REGIONID"].value_counts().to_dict()
+            print(f"wrote {len(built)} units ({counts}) from MMSDM {month} to {out}")
             return EXIT_OK
 
         if args.command == "investigate":
@@ -145,10 +177,11 @@ def main(argv: list[str] | None = None) -> int:
             w = Window(args.start, args.end)
             which = ["i1", "i2", "i3"] if args.which == "all" else [args.which]
             registry = None
-            if "i3" in which and s.registry_path:
+            reg_file = _registry_file(s)
+            if "i3" in which and reg_file:
                 from sagrid.registry import load_registry
 
-                registry = load_registry(s.registry_path)
+                registry = load_registry(reg_file)
             failed = 0
             for key in which:
                 try:

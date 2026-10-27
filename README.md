@@ -52,6 +52,7 @@ On macOS or Linux use `python3 -m venv .venv` and `source .venv/bin/activate`.
 | `sagrid ingest --start D --end D [--datasets ...]` | Load a date range (skips files already loaded unchanged) |
 | `sagrid backfill --start D --end D` | Reload a range even if files are unchanged, e.g. after an AEMO correction |
 | `sagrid check --start D --end D [--json]` | Freshness, completeness, reject rate and reconciliation checks |
+| `sagrid registry [--on D]` | Build the generator registry (region, fuel, capacity per unit) from NEMWEB |
 | `sagrid export` | Write the Power BI star schema (Parquet and CSV) |
 | `sagrid investigate {i1,i2,i3,all} --start D --end D` | Run investigations I1 to I3 and write reports to `docs/investigations` ([details](docs/investigations/README.md)) |
 | `sagrid status` | Show the last run's totals |
